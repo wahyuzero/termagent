@@ -3,6 +3,28 @@ import { dirname, join, resolve, relative } from 'path';
 import { glob } from 'glob';
 import { diffLines } from 'diff';
 
+// Try to import undo manager (optional)
+let getUndoManager = null;
+try {
+  const undo = await import('../utils/undo.js');
+  getUndoManager = undo.getUndoManager;
+} catch {
+  // Undo not available
+}
+
+/**
+ * Backup file before modification
+ */
+async function backupFile(filepath, operation) {
+  if (getUndoManager) {
+    try {
+      await getUndoManager().backup(filepath, operation);
+    } catch {
+      // Ignore backup errors
+    }
+  }
+}
+
 /**
  * File Operations Tool Definitions
  */
@@ -206,6 +228,9 @@ async function writeFileOp({ path: filePath, content }) {
   const absolutePath = resolve(filePath);
   const dir = dirname(absolutePath);
 
+  // Backup before overwrite
+  await backupFile(absolutePath, 'write');
+
   // Ensure directory exists
   await mkdir(dir, { recursive: true });
   await writeFile(absolutePath, content, 'utf-8');
@@ -229,6 +254,9 @@ async function editFileOp({ path: filePath, search, replace }) {
       hint: 'Make sure the search text matches exactly, including whitespace',
     };
   }
+
+  // Backup before edit
+  await backupFile(absolutePath, 'edit');
 
   const newContent = content.replace(search, replace);
 
@@ -315,6 +343,10 @@ async function findFilesOp({ pattern, cwd }) {
 
 async function deleteFileOp({ path: filePath }) {
   const absolutePath = resolve(filePath);
+  
+  // Backup before delete
+  await backupFile(absolutePath, 'delete');
+  
   await unlink(absolutePath);
 
   return {

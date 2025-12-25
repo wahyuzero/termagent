@@ -92,6 +92,77 @@ program
     await startNewSession();
   });
 
+program
+  .command('chat')
+  .description('Start interactive chat mode')
+  .option('-c, --continue', 'Continue last session')
+  .action(async (options) => {
+    const { ChatRepl } = await import('./utils/chat.js');
+    const repl = new ChatRepl({ continue: options.continue });
+    await repl.start();
+  });
+
+program
+  .command('init')
+  .description('Initialize a new project from template')
+  .argument('[template]', 'Template: node, python, react, express, cli')
+  .action(async (template) => {
+    const { listTemplates, initProject, printInitResult } = await import('./utils/templates.js');
+    
+    if (!template) {
+      console.log(banner);
+      console.log(chalk.cyan.bold('Available Templates:\n'));
+      listTemplates().forEach(t => {
+        console.log(chalk.white(`  ${t.id.padEnd(10)} `) + chalk.gray(t.name));
+      });
+      console.log(chalk.gray('\nUsage: termagent init <template>\n'));
+      return;
+    }
+    
+    console.log(banner);
+    console.log(chalk.cyan(`Creating ${template} project...\n`));
+    const result = await initProject(template);
+    printInitResult(result);
+  });
+
+program
+  .command('undo')
+  .description('Undo last file change')
+  .action(async () => {
+    const { getUndoManager } = await import('./utils/undo.js');
+    const undo = getUndoManager();
+    const result = await undo.undo();
+    
+    console.log(banner);
+    if (result.success) {
+      console.log(chalk.green.bold(`✓ ${result.message}\n`));
+    } else {
+      console.log(chalk.yellow(`${result.error}\n`));
+    }
+  });
+
+program
+  .command('changes')
+  .description('Show recent file changes')
+  .action(async () => {
+    const { getUndoManager } = await import('./utils/undo.js');
+    const undo = getUndoManager();
+    const changes = await undo.getRecentChanges(10);
+    
+    console.log(banner);
+    if (changes.length === 0) {
+      console.log(chalk.gray('No recent changes\n'));
+      return;
+    }
+    
+    console.log(chalk.cyan.bold('Recent Changes:\n'));
+    changes.forEach((c, i) => {
+      const time = new Date(c.time).toLocaleTimeString();
+      console.log(chalk.gray(`  ${i + 1}. [${time}] ${c.operation}: ${c.file}`));
+    });
+    console.log(chalk.gray('\nUse "termagent undo" to revert the last change.\n'));
+  });
+
 program.parse();
 
 /**

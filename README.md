@@ -10,12 +10,15 @@ with multi-provider support.
 
 - **Multi-Provider Support** - OpenAI, Anthropic (Claude), Google (Gemini),
   Groq, Z.AI
-- **File Operations** - Read, write, edit, search files
+- **Interactive Chat** - REPL-style continuous conversation
+- **File Operations** - Read, write, edit, search files with undo support
 - **Shell Execution** - Run commands with safety checks
 - **Code Search** - Grep patterns and find definitions
 - **Git Integration** - Status, diff, log, branch operations
 - **Session Management** - Continue previous conversations
-- **Beautiful CLI** - Colored output, spinners, and detailed tool feedback
+- **Project Templates** - Quick-start Node.js, Python, React, Express, CLI
+- **Undo System** - Revert file changes made by AI
+- **Beautiful CLI** - Colored output, spinners, and detailed feedback
 
 ## 📦 Installation
 
@@ -75,6 +78,53 @@ termagent --provider groq "Create a Python script"
 termagent
 ```
 
+### Interactive Chat Mode
+
+```bash
+# Start interactive chat
+termagent chat
+
+# With session continuation
+termagent chat -c
+```
+
+**Chat Commands:**
+
+- `/help` - Show available commands
+- `/files` - List files in directory
+- `/read <file>` - Read file contents
+- `/run <cmd>` - Execute shell command
+- `/undo` - Undo last file change
+- `/diff` - Show recent changes
+- `/context` - Show project context
+- `/tokens` - Show token usage
+- `/clear` - Clear conversation
+- `/exit` - Exit chat
+
+### Project Templates
+
+```bash
+# List available templates
+termagent init
+
+# Create a new project
+termagent init node      # Node.js project
+termagent init python    # Python project
+termagent init react     # React + Vite
+termagent init express   # Express.js API
+termagent init cli       # CLI tool
+```
+
+### Undo System
+
+```bash
+# Show recent file changes
+termagent changes
+
+# Undo last file change
+termagent undo
+```
+
 ### Session Management
 
 ```bash
@@ -108,11 +158,11 @@ TermAgent can use these tools to help with your coding tasks:
 ### File Operations
 
 - `read_file` - Read file contents
-- `write_file` - Create or overwrite files
-- `edit_file` - Search and replace in files
+- `write_file` - Create or overwrite files (with undo)
+- `edit_file` - Search and replace in files (with undo)
 - `list_directory` - List directory contents
 - `find_files` - Search files by pattern
-- `delete_file` - Remove files
+- `delete_file` - Remove files (with undo)
 - `rename_file` - Rename or move files
 
 ### Shell Commands
@@ -134,9 +184,10 @@ TermAgent can use these tools to help with your coding tasks:
 
 ## 🔒 Security
 
-- API keys are stored securely in `~/.termagent/`
-- Dangerous commands require confirmation (rm -rf, sudo, etc.)
-- No data sent to third parties except your chosen AI provider
+- API keys stored securely in `~/.termagent/`
+- Dangerous commands require confirmation
+- File changes are backed up and can be undone
+- No data sent to third parties except chosen AI provider
 
 ## 📁 Project Structure
 
@@ -144,13 +195,12 @@ TermAgent can use these tools to help with your coding tasks:
 termagent/
 ├── src/
 │   ├── cli.js           # CLI entry point
-│   ├── index.js         # Main export
 │   ├── agent/           # AI agent controller
-│   ├── config/          # Configuration management
+│   ├── config/          # Configuration
 │   ├── conversation/    # Session management
-│   ├── providers/       # AI provider implementations
-│   ├── tools/           # Agent tools (file, shell, git, search)
-│   └── ui/              # Ink TUI components
+│   ├── providers/       # AI providers (5 total)
+│   ├── tools/           # Agent tools
+│   └── utils/           # Chat, undo, templates, context
 ├── package.json
 └── README.md
 ```
