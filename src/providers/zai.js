@@ -72,6 +72,7 @@ export class ZAIProvider extends BaseProvider {
 
     for await (const chunk of stream) {
       const delta = chunk.choices[0]?.delta;
+      const finishReason = chunk.choices[0]?.finish_reason;
 
       if (delta?.content) {
         yield {
@@ -104,21 +105,37 @@ export class ZAIProvider extends BaseProvider {
         }
       }
 
-      if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+      // Handle finish - yield any accumulated tool calls
+      if (finishReason) {
+        // Push last tool call if exists
         if (currentToolCall) {
           accumulatedToolCalls.push(currentToolCall);
+          currentToolCall = null;
         }
-        yield {
-          type: 'tool_calls',
-          toolCalls: accumulatedToolCalls.map((tc) => ({
-            id: tc.id,
-            name: tc.name,
-            arguments: JSON.parse(tc.arguments),
-          })),
-        };
-      }
 
-      if (chunk.choices[0]?.finish_reason === 'stop') {
+        // Yield tool calls if any
+        if (accumulatedToolCalls.length > 0) {
+          yield {
+            type: 'tool_calls',
+            toolCalls: accumulatedToolCalls.map((tc) => {
+              try {
+                return {
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: JSON.parse(tc.arguments),
+                };
+              } catch {
+                return {
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: {},
+                };
+              }
+            }),
+          };
+          accumulatedToolCalls = [];
+        }
+
         yield { type: 'done' };
       }
     }

@@ -305,7 +305,10 @@ function printToolCall(toolCall) {
       break;
       
     case 'run_command':
-      console.log(chalk.magenta('│ ') + chalk.gray('Command: ') + chalk.yellow(`$ ${args.command}`));
+      const cmdDisplay = args.command?.length > 100 
+        ? args.command.slice(0, 100) + chalk.gray(`... [${args.command.length} total chars]`)
+        : args.command;
+      console.log(chalk.magenta('│ ') + chalk.gray('Command: ') + chalk.yellow(`$ ${cmdDisplay}`));
       if (args.cwd) {
         console.log(chalk.magenta('│ ') + chalk.gray('CWD: ') + chalk.white(args.cwd));
       }
@@ -691,9 +694,11 @@ async function showSessionPicker() {
     }
   }
 
-  console.log(chalk.gray('\nReady! Use termagent with your message:\n'));
-  console.log(chalk.white('  termagent "your message"'));
-  console.log(chalk.white('  termagent -c "continue conversation"\n'));
+  // Start interactive chat mode
+  console.log();
+  const { ChatRepl } = await import('./utils/chat.js');
+  const repl = new ChatRepl({ continue: selected.action !== 'new' });
+  await repl.start();
 }
 
 /**
