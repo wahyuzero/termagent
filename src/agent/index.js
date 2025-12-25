@@ -84,20 +84,34 @@ export class Agent {
         return;
       }
 
+      // Filter out invalid tool calls (some models return malformed data)
+      const validToolCalls = toolCalls.filter(tc => tc && tc.name && typeof tc.name === 'string');
+      
+      if (validToolCalls.length === 0) {
+        yield { type: 'done' };
+        return;
+      }
+
       // Execute tool calls
-      for (const toolCall of toolCalls) {
-        yield { type: 'tool_call', tool: toolCall.name, args: toolCall.arguments };
+      for (const toolCall of validToolCalls) {
+        yield { type: 'tool_call', tool: toolCall.name, args: toolCall.arguments || {} };
         this.onToolCall(toolCall);
 
-        const result = await executeTool(toolCall.name, toolCall.arguments, {
-          confirmCallback: this.confirmCommands ? this.onConfirmCommand : null,
-        });
+        try {
+          const result = await executeTool(toolCall.name, toolCall.arguments || {}, {
+            confirmCallback: this.confirmCommands ? this.onConfirmCommand : null,
+          });
 
-        // Add tool result to conversation
-        conversation.addToolResult(toolCall.id, toolCall.name, result);
+          // Add tool result to conversation
+          conversation.addToolResult(toolCall.id, toolCall.name, result);
 
-        yield { type: 'tool_result', tool: toolCall.name, result };
-        this.onToolResult(toolCall.name, result);
+          yield { type: 'tool_result', tool: toolCall.name, result };
+          this.onToolResult(toolCall.name, result);
+        } catch (error) {
+          const errorResult = { error: error.message };
+          conversation.addToolResult(toolCall.id, toolCall.name, errorResult);
+          yield { type: 'tool_result', tool: toolCall.name, result: errorResult };
+        }
       }
 
       // Continue loop to let AI process tool results

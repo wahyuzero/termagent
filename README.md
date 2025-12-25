@@ -1,218 +1,193 @@
 # 🤖 TermAgent
 
-**AI Coding Agent for Termux** - A powerful terminal-based AI coding assistant
-with multi-provider support.
+**AI Coding Agent for Terminal** - A ~~powerful~~ *somewhat functional* AI assistant that can read, write, and execute code directly in your terminal. Built with 2 hands, remaining brain cells, coffee, and questionable life choices.
 
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-green)](https://nodejs.org/)
-[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Node.js](https://img.shields.io/badge/Node.js-20+-green?logo=node.js)
+![License](https://img.shields.io/badge/License-MIT-blue)
+![Tested On](https://img.shields.io/badge/Tested%20On-Potato%20Phone-orange)
 
 ## ✨ Features
 
-- **Multi-Provider Support** - OpenAI, Anthropic (Claude), Google (Gemini),
-  Groq, Z.AI
-- **Interactive Chat** - REPL-style continuous conversation
-- **File Operations** - Read, write, edit, search files with undo support
-- **Shell Execution** - Run commands with safety checks
-- **Code Search** - Grep patterns and find definitions
-- **Git Integration** - Status, diff, log, branch operations
-- **Session Management** - Continue previous conversations
-- **Project Templates** - Quick-start Node.js, Python, React, Express, CLI
-- **Undo System** - Revert file changes made by AI
-- **Beautiful CLI** - Colored output, spinners, and detailed feedback
+- 🔌 **Multi-Provider Support** - Groq, Gemini, Mistral, OpenRouter, ZAI, OpenAI, Anthropic
+- 🛠️ **Tool Execution** - Read/write files, run commands, search code
+- 💬 **Interactive Chat** - Conversational coding with context awareness
+- 📝 **Session Management** - Save and continue conversations
+- ⚡ **Free Tier Friendly** - Works great with free API providers
+- 🔐 **Safe by Default** - Command confirmation before dangerous operations
+- 🥔 **Potato Phone Tested** - If it runs on Redmi 14C, maybe it runs anywhere
 
-## 📦 Installation
+## � Tested Environment
+
+> *"If it works on a potato, maybe it works everywhere"* - Frugal Developer Proverb
+
+- **Device**: Redmi 14C (yes, that budget phone your uncle and cousin has)
+- **Environment**: Termux
+- **Node.js**: v24
+- **Tested Models**: Llama 3.3, GLM-4, Deepseek
+- **Other models**: *You test them yourself, I'm not your QA team* 🙃
+
+## �🚀 Quick Start
+
+### Installation
+
+Clone repository
 
 ```bash
-# Clone the repository
 git clone https://github.com/wahyuzero/termagent.git
 cd termagent
-
-# Install dependencies
-npm install
-
-# Install globally
-npm link
-
-# Verify installation
-termagent --version
 ```
 
-## 🚀 Quick Start
+Install dependencies
 
 ```bash
-# First run - setup wizard will guide you
-termagent
-
-# Or set API key and start directly
-export ZAI_API_KEY="your-key"  # or GROQ_API_KEY, OPENAI_API_KEY, etc.
-termagent "Create a hello world script"
+npm install
 ```
 
-## 🔑 API Keys
+Link globally
 
-Get your API key from one of these providers:
+```bash
+npm link
+```
 
-| Provider  | Free Tier  | Get API Key                                            |
-| --------- | ---------- | ------------------------------------------------------ |
-| **Groq**  | ✅ Yes     | [console.groq.com](https://console.groq.com)           |
-| **Z.AI**  | ✅ Yes     | [z.ai](https://z.ai)                                   |
-| OpenAI    | ❌ Paid    | [platform.openai.com](https://platform.openai.com)     |
-| Anthropic | ❌ Paid    | [console.anthropic.com](https://console.anthropic.com) |
-| Google    | ⚠️ Limited | [aistudio.google.com](https://aistudio.google.com)     |
+### Setup API Key
+
+Get a free API key from one of these providers:
+
+- **Groq** (Recommended): https://console.groq.com
+- **Gemini**: https://aistudio.google.com/apikey
+- **Mistral**: https://console.mistral.ai
+- **OpenRouter**: https://openrouter.ai/keys
+
+```bash
+# Set API key
+export GROQ_API_KEY="gsk_your_key_here"
+
+# Or run setup wizard
+termagent config
+```
+
+### Start Chatting
+
+Open folder where you want to chat with agent and run:
+
+```bash
+termagent
+```
 
 ## 📖 Usage
 
-### Basic Commands
+### Commands
 
-```bash
-# Send a single message
-termagent "List files in current directory"
+| Command        | Shortcut | Description        |
+| -------------- | -------- | ------------------ |
+| `/help`        | `/h`     | Show help          |
+| `/exit`        | `/q`     | Exit chat          |
+| `/files`       | `/f`     | List files         |
+| `/read <file>` | `/r`     | Read file          |
+| `/run <cmd>`   | `/x`     | Run command        |
+| `/undo`        | `/u`     | Undo last change   |
+| `/diff`        | `/d`     | Show changes       |
+| `/tokens`      | `/t`     | Token usage        |
+| `/provider`    | `/p`     | Switch provider    |
+| `/export`      | `/e`     | Export to markdown |
+| `/status`      |          | Session status     |
 
-# Continue last session
-termagent -c "What was I working on?"
+### Interactive Features
 
-# Use specific provider
-termagent --provider groq "Create a Python script"
+- **Arrow ↑/↓** → Navigate command history
+- **Type `a` at confirmation** → Always-allow command for session
+- **Git branch in prompt** → Shows current branch (e.g., `main* >`)
 
-# Interactive session picker
-termagent
+### Example Session
+
+```
+main* > Create hello.js that print hello world
+
+⛬  Response:
+I will create hello.js for you.
+
+   WRITE  (hello.js)
+   ↳ File written successfully
+
+main* > Run the file
+
+   RUN  (node hello.js)
+   ⚠ Command requires confirmation:
+   $ node hello.js
+   Allow? (y/n/a=always): y
+   ✓ Allowed
+   ↳ Hello, World!
 ```
 
-### Interactive Chat Mode
+## 🔧 Supported Providers
+
+### Free Tier
+
+| Provider       | Models                        | Get Key                                                   |
+| -------------- | ----------------------------- | --------------------------------------------------------- |
+| **Groq**       | Llama 3.3 70B, Mixtral, Gemma | [console.groq.com](https://console.groq.com)              |
+| **Gemini**     | Gemini 1.5/2.0 Flash/Pro      | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **Mistral**    | Mistral Small/Large           | [console.mistral.ai](https://console.mistral.ai)          |
+| **OpenRouter** | 60+ models                    | [openrouter.ai](https://openrouter.ai/keys)               |
+
+### Paid *(or "free if you know the right people")*
+
+| Provider      | Models                 |
+| ------------- | ---------------------- |
+| **ZAI**       | GLM-4, GPT-4o-mini, Claude |
+| **OpenAI**    | GPT-4o, GPT-4 Turbo    |
+| **Anthropic** | Claude 3.5 Sonnet/Opus |
+
+## ⚙️ Configuration
 
 ```bash
-# Start interactive chat
-termagent chat
-
-# With session continuation
-termagent chat -c
-```
-
-**Chat Commands:**
-
-- `/help` - Show available commands
-- `/files` - List files in directory
-- `/read <file>` - Read file contents
-- `/run <cmd>` - Execute shell command
-- `/undo` - Undo last file change
-- `/diff` - Show recent changes
-- `/context` - Show project context
-- `/tokens` - Show token usage
-- `/clear` - Clear conversation
-- `/exit` - Exit chat
-
-### Project Templates
-
-```bash
-# List available templates
-termagent init
-
-# Create a new project
-termagent init node      # Node.js project
-termagent init python    # Python project
-termagent init react     # React + Vite
-termagent init express   # Express.js API
-termagent init cli       # CLI tool
-```
-
-### Undo System
-
-```bash
-# Show recent file changes
-termagent changes
-
-# Undo last file change
-termagent undo
-```
-
-### Session Management
-
-```bash
-# View session history
-termagent history
-
-# Start new session
-termagent new
-
-# Continue with context
-termagent -c "Now add error handling"
-```
-
-### Configuration
-
-```bash
-# Configure API keys interactively
-termagent config
-
-# List available providers
+# Show current config
 termagent providers
 
-# Test connection
-termagent --test
+# Interactive setup
+termagent config
+
+# CLI options
+termagent -p groq -m llama-3.3-70b-versatile "your message"
+termagent --continue  # Continue last session
 ```
 
-## 🛠️ Available Tools
+### Environment Variables
 
-TermAgent can use these tools to help with your coding tasks:
+```bash
+export GROQ_API_KEY="gsk_..."
+export GEMINI_API_KEY="..."
+export MISTRAL_API_KEY="..."
+export OPENROUTER_API_KEY="sk-or-..."
+export ZAI_API_KEY="..."
+export OPENAI_API_KEY="sk-..."
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
 
-### File Operations
+## 🛡️ Security
 
-- `read_file` - Read file contents
-- `write_file` - Create or overwrite files (with undo)
-- `edit_file` - Search and replace in files (with undo)
-- `list_directory` - List directory contents
-- `find_files` - Search files by pattern
-- `delete_file` - Remove files (with undo)
-- `rename_file` - Rename or move files
-
-### Shell Commands
-
-- `run_command` - Execute shell commands (with safety checks)
-
-### Code Search
-
-- `grep_search` - Search for patterns in code
-- `find_definition` - Find function/class definitions
-
-### Git Operations
-
-- `git_status` - Check repository status
-- `git_diff` - Show file changes
-- `git_log` - View commit history
-- `git_branch` - List/manage branches
-- `git_show` - Show commit details
-
-## 🔒 Security
-
-- API keys stored securely in `~/.termagent/`
+- API keys stored in `~/.termagent/`
 - Dangerous commands require confirmation
-- File changes are backed up and can be undone
-- No data sent to third parties except chosen AI provider
+- Use `a` (always) to auto-allow safe commands per session
 
-## 📁 Project Structure
+## 📋 Requirements
 
-```
-termagent/
-├── src/
-│   ├── cli.js           # CLI entry point
-│   ├── agent/           # AI agent controller
-│   ├── config/          # Configuration
-│   ├── conversation/    # Session management
-│   ├── providers/       # AI providers (5 total)
-│   ├── tools/           # Agent tools
-│   └── utils/           # Chat, undo, templates, context
-├── package.json
-└── README.md
-```
+- Node.js 20+ (tested on v24)
+- Any terminal with ANSI color support
+- A device with at least 2 brain cells worth of RAM
 
-## 🤝 Contributing
+## 🐛 Issues & Support
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+Found a bug? Have a feature request? Want to complain about life choices?
+
+**Contact**: [frugaldev.biz.id](https://frugaldev.biz.id)
+
+> ⚠️ **Note**: Issues will be addressed *if and when I'm not busy*. No guarantees, no SLA, no refunds. This is free software, what did you expect? 😅
 
 ## 📄 License
 
-MIT License - see [LICENSE](LICENSE) file for details.
+MIT © wahyuzero
 
 ---
 
-Made with ❤️ for Termux users
+*Made with 2 hands and probably too much caffeine*

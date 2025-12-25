@@ -1,12 +1,45 @@
 import chalk from 'chalk';
 import ora from 'ora';
 import readline from 'readline';
+import { select } from '@inquirer/prompts';
+import { marked } from 'marked';
+import TerminalRenderer from 'marked-terminal';
 import { createAgent } from '../agent/index.js';
 import config from '../config/index.js';
 import { getUndoManager } from './undo.js';
 import { getProjectInfo } from './context.js';
-import { autoSave, loadLastSession, newConversation } from '../conversation/index.js';
+import { getGitPrompt } from './git.js';
+import { autoSave, loadLastSession, newConversation, getMessages } from '../conversation/index.js';
 import { executeTool } from '../tools/index.js';
+import { writeFile } from 'fs/promises';
+import { join } from 'path';
+
+// Configure marked for terminal rendering
+marked.setOptions({
+  renderer: new TerminalRenderer({
+    // Text formatting
+    reflowText: true,
+    width: Math.min(process.stdout.columns || 80, 100),
+    
+    // Code blocks styling
+    code: chalk.bgGray.white,
+    codespan: chalk.cyan,
+    
+    // Heading styling  
+    firstHeading: chalk.bold.cyan,
+    heading: chalk.bold.white,
+    
+    // Table styling
+    tableOptions: {
+      chars: {
+        'top': '─', 'top-mid': '┬', 'top-left': '┌', 'top-right': '┐',
+        'bottom': '─', 'bottom-mid': '┴', 'bottom-left': '└', 'bottom-right': '┘',
+        'left': '│', 'left-mid': '├', 'mid': '─', 'mid-mid': '┼',
+        'right': '│', 'right-mid': '┤', 'middle': '│'
+      }
+    },
+  }),
+});
 
 // Modern icons for display
 const ICONS = {
@@ -25,6 +58,49 @@ const ICONS = {
   git: '⎇',
 };
 
+// Available slash commands for autocomplete
+const SLASH_COMMANDS = [
+  { value: '/help', name: '/help - Show help', description: 'Show available commands' },
+  { value: '/exit', name: '/exit - Exit chat', description: 'Exit the chat' },
+  { value: '/clear', name: '/clear - Clear conversation', description: 'Start fresh' },
+  { value: '/files', name: '/files - List files', description: 'List directory contents' },
+  { value: '/read', name: '/read <file> - Read file', description: 'Read file content' },
+  { value: '/run', name: '/run <cmd> - Run command', description: 'Execute shell command' },
+  { value: '/undo', name: '/undo - Undo last change', description: 'Undo file change' },
+  { value: '/diff', name: '/diff - Show changes', description: 'Recent file changes' },
+  { value: '/context', name: '/context - Project info', description: 'Show project context' },
+  { value: '/tokens', name: '/tokens - Token usage', description: 'Show token count' },
+  { value: '/status', name: '/status - Session status', description: 'Current session info' },
+  { value: '/provider', name: '/provider - Switch provider', description: 'Change AI provider' },
+  { value: '/export', name: '/export - Export chat', description: 'Save to markdown' },
+  { value: '/save', name: '/save - Save session', description: 'Save current session' },
+];
+
+/**
+ * Format error message with helpful suggestions
+ */
+function formatError(error) {
+  const msg = error.message || String(error);
+  let suggestion = '';
+  
+  // Common error patterns with suggestions
+  if (msg.includes('401') || msg.includes('Unauthorized') || msg.includes('invalid_api_key')) {
+    suggestion = '\n   💡 Check your API key: /status or set env var';
+  } else if (msg.includes('429') || msg.includes('rate limit') || msg.includes('too many requests')) {
+    suggestion = '\n   💡 Rate limited. Wait a moment and try again, or switch provider: /p';
+  } else if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
+    suggestion = '\n   💡 Request timed out. Check your connection or try again';
+  } else if (msg.includes('ECONNREFUSED') || msg.includes('network') || msg.includes('fetch failed')) {
+    suggestion = '\n   💡 Network error. Check your internet connection';
+  } else if (msg.includes('model') && msg.includes('not found')) {
+    suggestion = '\n   💡 Model not available. Try: /p to switch model';
+  } else if (msg.includes('context length') || msg.includes('too long')) {
+    suggestion = '\n   💡 Message too long. Try: /clear to reset conversation';
+  }
+  
+  return `${ICONS.error} Error: ${msg}${chalk.gray(suggestion)}`;
+}
+
 /**
  * Interactive Chat REPL with Modern UI
  */
@@ -38,6 +114,8 @@ export class ChatRepl {
     this.spinner = null;
     this.tokenUsage = { prompt: 0, completion: 0 };
     this.pendingTasks = [];
+    this.commandHistory = [];
+    this.maxHistorySize = 100;
   }
 
   /**
@@ -81,23 +159,29 @@ export class ChatRepl {
 
   /**
    * Show prompt and handle next input
-   * Creates a fresh readline for each prompt to avoid state issues
+   * Features: git status, command history, interactive slash menu
    */
-  promptNext() {
+  async promptNext() {
     if (!this.running) {
       this.cleanup();
       return;
     }
     
-    // Create fresh readline for this prompt
+    // Get git status for prompt
+    const gitStatus = await getGitPrompt();
+    const gitPart = gitStatus ? chalk.magenta(`${gitStatus} `) : '';
+    const prompt = `${gitPart}${chalk.green('>')} `;
+    
+    // Create readline with history
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
       terminal: process.stdin.isTTY,
+      history: this.commandHistory.slice().reverse(),
+      historySize: this.maxHistorySize,
     });
     
-    rl.question(chalk.green('> '), async (answer) => {
-      // Close this readline immediately after getting input
+    rl.question(prompt, async (answer) => {
       rl.close();
       
       if (!this.running) {
@@ -108,6 +192,34 @@ export class ChatRepl {
       const input = (answer || '').trim();
       
       if (!input) {
+        setImmediate(() => this.promptNext());
+        return;
+      }
+      
+      // Add to history (if not empty and not duplicate)
+      if (input && (this.commandHistory.length === 0 || this.commandHistory[this.commandHistory.length - 1] !== input)) {
+        this.commandHistory.push(input);
+        if (this.commandHistory.length > this.maxHistorySize) {
+          this.commandHistory.shift();
+        }
+      }
+      
+      // Check if user typed just "/" - show interactive menu
+      if (input === '/') {
+        try {
+          const selected = await select({
+            message: 'Select command:',
+            choices: SLASH_COMMANDS,
+            pageSize: 10,
+          });
+          
+          // Handle the selected command
+          if (selected) {
+            await this.handleInput(selected);
+          }
+        } catch {
+          // User cancelled (Ctrl+C)
+        }
         setImmediate(() => this.promptNext());
         return;
       }
@@ -203,54 +315,73 @@ export class ChatRepl {
 
       case 'files':
       case 'ls':
+      case 'f':
         await this.listFiles(arg);
         break;
 
       case 'read':
       case 'cat':
+      case 'r':
         await this.readFile(arg);
         break;
 
       case 'run':
       case 'exec':
+      case 'x':
         await this.runCommand(arg);
         break;
 
       case 'undo':
+      case 'u':
         await this.undoLastChange();
         break;
 
       case 'diff':
       case 'changes':
+      case 'd':
         await this.showRecentChanges();
         break;
 
       case 'context':
       case 'project':
+      case 'c':
         await this.showProjectContext();
         break;
 
       case 'save':
+      case 's':
         await autoSave();
         console.log(chalk.green(`${ICONS.success} Session saved\n`));
         break;
 
       case 'tokens':
       case 'usage':
+      case 't':
         this.showTokenUsage();
         break;
 
       case 'provider':
+      case 'p':
         if (arg) {
           try {
-            config.setProvider(arg);
-            console.log(chalk.green(`${ICONS.success} Switched to ${arg}\n`));
+            const [provider, model] = arg.split(' ');
+            config.setProvider(provider, model);
+            console.log(chalk.green(`${ICONS.success} Switched to ${provider}${model ? '/' + model : ''}\n`));
           } catch (e) {
             console.log(chalk.red(`${ICONS.error} ${e.message}\n`));
           }
         } else {
-          console.log(chalk.gray(`Current: ${config.getCurrentProvider()}/${config.getCurrentModel()}\n`));
+          await this.showProviderMenu();
         }
+        break;
+
+      case 'status':
+        this.showStatus();
+        break;
+
+      case 'export':
+      case 'e':
+        await this.exportConversation(arg);
         break;
 
       default:
@@ -266,37 +397,85 @@ export class ChatRepl {
     this.processing = true;
     this.pendingTasks = [];
     
-    // Simple thinking indicator (no ora spinner - it breaks readline)
-    console.log(chalk.cyan('\n⛬  ') + chalk.gray('Thinking...\n'));
+    // Elapsed time counter
+    const startTime = Date.now();
+    let elapsedInterval = null;
+    
+    // Show thinking with elapsed time
+    process.stdout.write(chalk.cyan('\n⛬  ') + chalk.gray('Thinking... '));
+    
+    elapsedInterval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      process.stdout.write(`\r${chalk.cyan('⛬  ')}${chalk.gray('Thinking...')} ${chalk.yellow(`${elapsed}s`)}`);
+    }, 1000);
+    
     this.spinner = null;
 
     let response = '';
     let hasContent = false;
 
     try {
+      let pendingMarkdown = '';
+      
       for await (const chunk of this.agent.chat(message)) {
         if (chunk.type === 'content') {
-          if (this.spinner && this.spinner.isSpinning) {
-            this.spinner.stop();
+          // Stop elapsed timer on first content
+          if (elapsedInterval) {
+            clearInterval(elapsedInterval);
+            elapsedInterval = null;
           }
+          
           if (!hasContent) {
+            // Clear the "Thinking..." line and show response header
+            process.stdout.write('\r\x1b[K');
             console.log(chalk.cyan(ICONS.thinking) + '  ' + chalk.gray('Response:\n'));
             hasContent = true;
           }
-          process.stdout.write(chalk.white(chunk.content));
+          
+          // Accumulate content
           response += chunk.content;
+          pendingMarkdown += chunk.content;
+          
+          // Render completed paragraphs (when we see double newline)
+          if (pendingMarkdown.includes('\n\n')) {
+            const parts = pendingMarkdown.split(/\n\n/);
+            // Render all complete paragraphs
+            for (let i = 0; i < parts.length - 1; i++) {
+              if (parts[i].trim()) {
+                try {
+                  const rendered = marked(parts[i] + '\n');
+                  process.stdout.write(rendered);
+                } catch {
+                  process.stdout.write(parts[i] + '\n\n');
+                }
+              }
+            }
+            // Keep the incomplete part for next iteration
+            pendingMarkdown = parts[parts.length - 1];
+          }
+          
         } else if (chunk.type === 'usage') {
           this.tokenUsage.prompt += chunk.promptTokens || 0;
           this.tokenUsage.completion += chunk.completionTokens || 0;
         } else if (chunk.type === 'error') {
-          if (this.spinner) this.spinner.stop();
-          console.log(chalk.red(`\n${ICONS.error} Error: ${chunk.error}\n`));
+          if (elapsedInterval) clearInterval(elapsedInterval);
+          process.stdout.write('\r\x1b[K');
+          console.log(chalk.red(`\n${formatError({message: chunk.error})}\n`));
         } else if (chunk.type === 'done') {
-          if (this.spinner && this.spinner.isSpinning) {
-            this.spinner.stop();
+          if (elapsedInterval) clearInterval(elapsedInterval);
+          
+          // Render any remaining markdown
+          if (pendingMarkdown.trim()) {
+            try {
+              const rendered = marked(pendingMarkdown);
+              process.stdout.write(rendered);
+            } catch {
+              process.stdout.write(pendingMarkdown);
+            }
           }
+          
           if (hasContent) {
-            console.log('\n');
+            console.log(''); // End with newline
           }
           
           // Show pending tasks if any
@@ -309,13 +488,16 @@ export class ChatRepl {
         }
       }
     } catch (error) {
-      if (this.spinner) this.spinner.stop();
-      console.log(chalk.red(`\n${ICONS.error} Error: ${error.message}\n`));
+      if (elapsedInterval) clearInterval(elapsedInterval);
+      process.stdout.write('\r\x1b[K'); // Clear line
+      console.log(chalk.red(`\n${formatError(error)}\n`));
     }
     
-    // Force flush stdout before returning
-    if (process.stdout.write) {
-      process.stdout.write('');
+    // Estimate tokens if API didn't provide usage data
+    // Rough estimate: ~4 characters per token
+    if (this.tokenUsage.prompt === 0 && this.tokenUsage.completion === 0) {
+      this.tokenUsage.prompt += Math.ceil(message.length / 4);
+      this.tokenUsage.completion += Math.ceil(response.length / 4);
     }
     
     this.processing = false;
@@ -331,8 +513,14 @@ export class ChatRepl {
     
     const { name, arguments: args } = tc;
     
+    // Skip invalid tool calls (some models return malformed data)
+    if (!name || typeof name !== 'string') {
+      console.log(chalk.yellow(`\n   ${ICONS.warning} Skipped invalid tool call (no name)`));
+      return;
+    }
+    
     // Format tool name nicely
-    const toolDisplay = this.formatToolName(name, args);
+    const toolDisplay = this.formatToolName(name, args || {});
     
     console.log(chalk.cyan(`\n   ${toolDisplay.icon}  ${toolDisplay.label}`));
     
@@ -399,10 +587,24 @@ export class ChatRepl {
   }
 
   /**
-   * Confirm dangerous command
+   * Confirm dangerous command with always-allow option
    */
   async confirmCommand(cmd, reason) {
     if (this.spinner) this.spinner.stop();
+    
+    // Initialize session allowed patterns if needed
+    if (!this.sessionAllowedPatterns) {
+      this.sessionAllowedPatterns = new Set();
+    }
+    
+    // Extract command pattern (first word/binary)
+    const cmdPattern = cmd.split(' ')[0].split('/').pop();
+    
+    // Check if already allowed for this session
+    if (this.sessionAllowedPatterns.has(cmdPattern)) {
+      console.log(chalk.gray(`\n   ${ICONS.success} Auto-allowed: ${cmdPattern}`));
+      return true;
+    }
     
     // Truncate long commands
     const maxLen = 60;
@@ -421,11 +623,23 @@ export class ChatRepl {
         terminal: process.stdin.isTTY,
       });
       
-      rl.question(chalk.cyan('   Allow? (y/n): '), (answer) => {
-        const allowed = answer.toLowerCase() === 'y' || answer.toLowerCase() === 'yes';
-        console.log(allowed ? chalk.green(`   ${ICONS.success} Allowed`) : chalk.red(`   ${ICONS.error} Denied`));
+      rl.question(chalk.cyan('   Allow? (y/n/a=always): '), (answer) => {
         rl.close();
-        resolve(allowed);
+        
+        const choice = answer.toLowerCase().trim();
+        
+        if (choice === 'a' || choice === 'always') {
+          // Add to session allowed patterns
+          this.sessionAllowedPatterns.add(cmdPattern);
+          console.log(chalk.green(`   ${ICONS.success} Allowed (always for "${cmdPattern}" this session)`));
+          resolve(true);
+        } else if (choice === 'y' || choice === 'yes') {
+          console.log(chalk.green(`   ${ICONS.success} Allowed`));
+          resolve(true);
+        } else {
+          console.log(chalk.red(`   ${ICONS.error} Denied`));
+          resolve(false);
+        }
       });
     });
   }
@@ -455,23 +669,35 @@ export class ChatRepl {
    * Show help
    */
   showHelp() {
-    console.log(chalk.cyan.bold('\nCommands:\n'));
-    console.log(chalk.white('  /help       ') + chalk.gray('Show this help'));
-    console.log(chalk.white('  /exit       ') + chalk.gray('Exit chat'));
+    console.log(chalk.cyan.bold('\n📖 COMMANDS') + chalk.gray(' (shortcuts in parentheses)\n'));
+    
+    console.log(chalk.white('  /help, /h   ') + chalk.gray('Show this help'));
+    console.log(chalk.white('  /exit, /q   ') + chalk.gray('Exit chat'));
     console.log(chalk.white('  /clear      ') + chalk.gray('Clear conversation'));
-    console.log(chalk.white('  /save       ') + chalk.gray('Save session'));
+    console.log(chalk.white('  /save, /s   ') + chalk.gray('Save session'));
+    console.log(chalk.white('  /export, /e ') + chalk.gray('Export to markdown'));
     console.log();
-    console.log(chalk.cyan.bold('Quick Actions:\n'));
-    console.log(chalk.white('  /files      ') + chalk.gray('List files'));
-    console.log(chalk.white('  /read <f>   ') + chalk.gray('Read file'));
-    console.log(chalk.white('  /run <cmd>  ') + chalk.gray('Run command'));
-    console.log(chalk.white('  /undo       ') + chalk.gray('Undo last change'));
-    console.log(chalk.white('  /diff       ') + chalk.gray('Show changes'));
+    
+    console.log(chalk.cyan.bold('⚡ Quick Actions\n'));
+    console.log(chalk.white('  /files, /f      ') + chalk.gray('List files'));
+    console.log(chalk.white('  /read, /r <f>   ') + chalk.gray('Read file'));
+    console.log(chalk.white('  /run, /x <cmd>  ') + chalk.gray('Run command'));
+    console.log(chalk.white('  /undo, /u       ') + chalk.gray('Undo last change'));
+    console.log(chalk.white('  /diff, /d       ') + chalk.gray('Show changes'));
     console.log();
-    console.log(chalk.cyan.bold('Info:\n'));
-    console.log(chalk.white('  /context    ') + chalk.gray('Project info'));
-    console.log(chalk.white('  /tokens     ') + chalk.gray('Token usage'));
-    console.log(chalk.white('  /provider   ') + chalk.gray('Switch provider'));
+    
+    console.log(chalk.cyan.bold('📊 Info\n'));
+    console.log(chalk.white('  /context, /c  ') + chalk.gray('Project info'));
+    console.log(chalk.white('  /tokens, /t   ') + chalk.gray('Token usage'));
+    console.log(chalk.white('  /status       ') + chalk.gray('Session status'));
+    console.log(chalk.white('  /provider, /p ') + chalk.gray('Switch provider (interactive)'));
+    console.log();
+    
+    console.log(chalk.gray('💡 Tips:'));
+    console.log(chalk.gray('  • Type "/" alone for interactive command menu'));
+    console.log(chalk.gray('  • Use ↑/↓ arrows to navigate command history'));
+    console.log(chalk.gray('  • Type "a" at confirmation to always-allow'));
+    console.log(chalk.gray('  • Git branch shown in prompt (e.g., main* >)'));
     console.log();
   }
 
@@ -603,12 +829,177 @@ export class ChatRepl {
     const total = this.tokenUsage.prompt + this.tokenUsage.completion;
     const cost = (this.tokenUsage.prompt * 0.00003) + (this.tokenUsage.completion * 0.00006);
     
-    console.log(chalk.cyan('\n   TOKEN USAGE\n'));
+    console.log(chalk.cyan('\n   TOKEN USAGE') + chalk.gray(' (estimated)\n'));
     console.log(chalk.gray(`   Prompt: ${this.tokenUsage.prompt.toLocaleString()}`));
     console.log(chalk.gray(`   Completion: ${this.tokenUsage.completion.toLocaleString()}`));
     console.log(chalk.gray(`   Total: ${total.toLocaleString()}`));
     console.log(chalk.gray(`   Est. Cost: $${cost.toFixed(4)}`));
     console.log();
+  }
+
+  /**
+   * Show interactive provider selection menu
+   */
+  async showProviderMenu() {
+    const { defaults } = await import('../config/defaults.js');
+    const providers = Object.keys(defaults.providers);
+    
+    console.log(chalk.cyan('\n   SWITCH PROVIDER\n'));
+    console.log(chalk.gray(`   Current: ${config.getCurrentProvider()}/${config.getCurrentModel()}\n`));
+    
+    providers.forEach((p, i) => {
+      const hasKey = config.getApiKey(p);
+      const status = hasKey ? chalk.green('✓') : chalk.red('✗');
+      const current = p === config.getCurrentProvider() ? chalk.cyan(' ←') : '';
+      const free = ['groq', 'zai', 'gemini', 'mistral', 'openrouter'].includes(p) ? chalk.green(' (free)') : '';
+      console.log(chalk.white(`   [${i + 1}] ${status} ${p}${free}${current}`));
+    });
+    
+    console.log(chalk.gray('\n   [0] Cancel\n'));
+    
+    // Get selection
+    return new Promise((resolve) => {
+      const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+        terminal: process.stdin.isTTY,
+      });
+      
+      rl.question(chalk.cyan('   Select [0-' + providers.length + ']: '), async (answer) => {
+        rl.close();
+        
+        const choice = parseInt(answer, 10);
+        if (choice === 0 || isNaN(choice)) {
+          console.log(chalk.gray('   Cancelled\n'));
+          resolve();
+          return;
+        }
+        
+        if (choice >= 1 && choice <= providers.length) {
+          const selectedProvider = providers[choice - 1];
+          const providerConfig = defaults.providers[selectedProvider];
+          
+          // Show model selection
+          console.log(chalk.cyan('\n   SELECT MODEL\n'));
+          providerConfig.models.forEach((m, i) => {
+            const isDefault = m === providerConfig.defaultModel ? chalk.gray(' (default)') : '';
+            console.log(chalk.white(`   [${i + 1}] ${m}${isDefault}`));
+          });
+          
+          const rl2 = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+            terminal: process.stdin.isTTY,
+          });
+          
+          rl2.question(chalk.cyan('\n   Select model [1-' + providerConfig.models.length + ']: '), (modelAnswer) => {
+            rl2.close();
+            
+            const modelChoice = parseInt(modelAnswer, 10);
+            const model = (modelChoice >= 1 && modelChoice <= providerConfig.models.length) 
+              ? providerConfig.models[modelChoice - 1]
+              : providerConfig.defaultModel;
+            
+            try {
+              config.setProvider(selectedProvider, model);
+              console.log(chalk.green(`\n   ${ICONS.success} Switched to ${selectedProvider}/${model}\n`));
+            } catch (e) {
+              console.log(chalk.red(`\n   ${ICONS.error} ${e.message}\n`));
+            }
+            resolve();
+          });
+        } else {
+          console.log(chalk.red('   Invalid choice\n'));
+          resolve();
+        }
+      });
+    });
+  }
+
+  /**
+   * Show session status
+   */
+  showStatus() {
+    console.log(chalk.cyan('\n   SESSION STATUS\n'));
+    console.log(chalk.gray(`   Provider: ${chalk.white(config.getCurrentProvider())}/${chalk.white(config.getCurrentModel())}`));
+    console.log(chalk.gray(`   Directory: ${chalk.white(process.cwd())}`));
+    console.log(chalk.gray(`   Session: ${chalk.white(this.options.continue ? 'Continued' : 'New')}`));
+    
+    const total = this.tokenUsage.prompt + this.tokenUsage.completion;
+    console.log(chalk.gray(`   Tokens: ${chalk.white(total.toLocaleString())} (estimated)`));
+    
+    if (this.sessionAllowedPatterns && this.sessionAllowedPatterns.size > 0) {
+      console.log(chalk.gray(`   Auto-allowed: ${chalk.white(this.sessionAllowedPatterns.size)} command patterns`));
+    }
+    console.log();
+  }
+
+  /**
+   * Export conversation to markdown file
+   */
+  async exportConversation(filename) {
+    try {
+      const messages = getMessages();
+      
+      if (!messages || messages.length === 0) {
+        console.log(chalk.yellow(`\n${ICONS.warning} No conversation to export\n`));
+        return;
+      }
+      
+      // Generate markdown
+      const date = new Date().toISOString().split('T')[0];
+      const time = new Date().toLocaleTimeString();
+      let md = `# TermAgent Conversation\n\n`;
+      md += `**Date:** ${date} ${time}\n`;
+      md += `**Provider:** ${config.getCurrentProvider()}/${config.getCurrentModel()}\n`;
+      md += `**Directory:** ${process.cwd()}\n\n`;
+      md += `---\n\n`;
+      
+      for (const msg of messages) {
+        if (msg.role === 'system') {
+          // Skip system messages or add as collapsed section
+          continue;
+        } else if (msg.role === 'user') {
+          md += `## 👤 User\n\n${msg.content}\n\n`;
+        } else if (msg.role === 'assistant') {
+          md += `## 🤖 Assistant\n\n`;
+          
+          if (msg.content) {
+            md += `${msg.content}\n\n`;
+          }
+          
+          // Handle tool calls
+          if (msg.tool_calls && msg.tool_calls.length > 0) {
+            md += `### Tool Calls\n\n`;
+            for (const tc of msg.tool_calls) {
+              const name = tc.function?.name || tc.name || 'unknown';
+              const args = tc.function?.arguments || tc.arguments || {};
+              md += `<details>\n<summary>📌 ${name}</summary>\n\n`;
+              md += `\`\`\`json\n${JSON.stringify(args, null, 2)}\n\`\`\`\n\n`;
+              md += `</details>\n\n`;
+            }
+          }
+        } else if (msg.role === 'tool') {
+          // Tool results
+          const content = msg.content?.slice(0, 500) || '(no content)';
+          md += `<details>\n<summary>🔧 Tool Result: ${msg.name || 'result'}</summary>\n\n`;
+          md += `\`\`\`\n${content}${msg.content?.length > 500 ? '...' : ''}\n\`\`\`\n\n`;
+          md += `</details>\n\n`;
+        }
+      }
+      
+      md += `---\n\n*Exported by TermAgent*\n`;
+      
+      // Save file
+      const outputFile = filename || `termagent-export-${date}.md`;
+      const outputPath = join(process.cwd(), outputFile);
+      await writeFile(outputPath, md, 'utf-8');
+      
+      console.log(chalk.green(`\n${ICONS.success} Exported to: ${outputFile}\n`));
+      
+    } catch (error) {
+      console.log(chalk.red(`\n${ICONS.error} Export failed: ${error.message}\n`));
+    }
   }
 
   /**

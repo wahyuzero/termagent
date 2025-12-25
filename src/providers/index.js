@@ -4,13 +4,22 @@ import { AnthropicProvider } from './anthropic.js';
 import { GoogleProvider } from './google.js';
 import { GroqProvider } from './groq.js';
 import { ZAIProvider } from './zai.js';
+import { OpenRouterProvider } from './openrouter.js';
+import { GeminiProvider } from './gemini.js';
+import { MistralProvider } from './mistral.js';
 
 const providerClasses = {
+  // Free tier providers
+  groq: GroqProvider,
+  zai: ZAIProvider,
+  gemini: GeminiProvider,
+  mistral: MistralProvider,
+  openrouter: OpenRouterProvider,
+  
+  // Paid providers
   openai: OpenAIProvider,
   anthropic: AnthropicProvider,
   google: GoogleProvider,
-  groq: GroqProvider,
-  zai: ZAIProvider,
 };
 
 let currentProvider = null;

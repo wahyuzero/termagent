@@ -295,6 +295,13 @@ export function newConversation() {
 }
 
 /**
+ * Get messages from current conversation
+ */
+export function getMessages() {
+  return getConversation().messages;
+}
+
+/**
  * Load the last session if exists
  * @returns {Promise<ConversationManager|null>}
  */

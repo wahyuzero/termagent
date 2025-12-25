@@ -480,11 +480,10 @@ async function configureKeys() {
       rl.question(prompt, resolve);
     });
 
-  console.log(chalk.gray('Enter API keys (leave blank to skip):\n'));
-
-  const providers = ['openai', 'anthropic', 'google', 'groq', 'zai'];
-
-  for (const provider of providers) {
+  console.log(chalk.green.bold('Free Tier Providers:\n'));
+  
+  const freeProviders = ['groq', 'gemini', 'mistral', 'openrouter', 'zai'];
+  for (const provider of freeProviders) {
     const current = config.getApiKey(provider);
     const masked = current ? chalk.green(current.slice(0, 8) + '...') : chalk.gray('(not set)');
     const key = await question(`${chalk.white(provider)} [${masked}]: `);
@@ -495,14 +494,27 @@ async function configureKeys() {
     }
   }
 
-  const defaultProvider = await question(chalk.white('\nDefault provider [openai]: '));
-  if (defaultProvider.trim()) {
-    try {
-      config.setProvider(defaultProvider.trim());
-      console.log(chalk.green(`  ✓ Default provider: ${defaultProvider.trim()}`));
-    } catch (e) {
-      console.error(chalk.red(`  ✗ Invalid provider: ${defaultProvider}`));
+  console.log(chalk.gray.bold('\nPaid Providers:\n'));
+  
+  const paidProviders = ['openai', 'anthropic'];
+  for (const provider of paidProviders) {
+    const current = config.getApiKey(provider);
+    const masked = current ? chalk.green(current.slice(0, 8) + '...') : chalk.gray('(not set)');
+    const key = await question(`${chalk.white(provider)} [${masked}]: `);
+
+    if (key.trim()) {
+      config.setApiKey(provider, key.trim());
+      console.log(chalk.green(`  ✓ ${provider} key saved\n`));
     }
+  }
+
+  const defaultProvider = await question(chalk.white('\nDefault provider [groq]: '));
+  const providerChoice = defaultProvider.trim() || 'groq';
+  try {
+    config.setProvider(providerChoice);
+    console.log(chalk.green(`  ✓ Default provider: ${providerChoice}`));
+  } catch (e) {
+    console.error(chalk.red(`  ✗ Invalid provider: ${providerChoice}`));
   }
 
   rl.close();
@@ -721,12 +733,16 @@ ${chalk.cyan.bold('╚═══════════════════�
   console.log(chalk.cyan.bold('First-Time Setup\n'));
   console.log(chalk.gray('Let\'s configure your AI provider. You\'ll need at least one API key.\n'));
   
-  console.log(chalk.white.bold('Available Providers:'));
-  console.log(chalk.gray('  • OpenAI     - GPT-4, GPT-4o (https://platform.openai.com)'));
-  console.log(chalk.gray('  • Anthropic  - Claude 3.5 (https://console.anthropic.com)'));
-  console.log(chalk.gray('  • Google     - Gemini (https://aistudio.google.com)'));
-  console.log(chalk.gray('  • Groq       - Llama 3.3 (https://console.groq.com) - Free tier!'));
-  console.log(chalk.gray('  • Z.AI       - GLM-4.7 (https://z.ai) - Free tier!\n'));
+  console.log(chalk.white.bold('Free Tier Providers:'));
+  console.log(chalk.green('  • Groq       - Llama 3.3 (https://console.groq.com)'));
+  console.log(chalk.green('  • Gemini     - Google AI (https://aistudio.google.com/apikey)'));
+  console.log(chalk.green('  • Mistral    - Mistral AI (https://console.mistral.ai)'));
+  console.log(chalk.green('  • OpenRouter - 60+ models (https://openrouter.ai/keys)'));
+  console.log(chalk.green('  • Z.AI       - GLM-4.7 (Discord bot)'));
+  console.log();
+  console.log(chalk.white.bold('Paid Providers:'));
+  console.log(chalk.gray('  • OpenAI     - GPT-4o (https://platform.openai.com)'));
+  console.log(chalk.gray('  • Anthropic  - Claude (https://console.anthropic.com)\n'));
 
   const rl = readline.createInterface({
     input: process.stdin,
@@ -740,21 +756,23 @@ ${chalk.cyan.bold('╚═══════════════════�
 
   // Provider selection
   console.log(chalk.cyan.bold('Step 1: Choose your provider\n'));
-  const providers = ['openai', 'anthropic', 'google', 'groq', 'zai'];
+  const providers = ['groq', 'gemini', 'mistral', 'openrouter', 'zai', 'openai', 'anthropic'];
   
   providers.forEach((p, i) => {
-    const recommended = p === 'groq' || p === 'zai' ? chalk.green(' (free tier)') : '';
-    console.log(chalk.white(`  [${i + 1}] ${p}${recommended}`));
+    const free = ['groq', 'gemini', 'mistral', 'openrouter', 'zai'].includes(p) 
+      ? chalk.green(' (free)') 
+      : chalk.gray(' (paid)');
+    console.log(chalk.white(`  [${i + 1}] ${p}${free}`));
   });
   
   let selectedProvider = null;
   while (!selectedProvider) {
-    const choice = await question(chalk.cyan('\nSelect provider [1-5]: '));
+    const choice = await question(chalk.cyan(`\nSelect provider [1-${providers.length}]: `));
     const index = parseInt(choice, 10) - 1;
     if (index >= 0 && index < providers.length) {
       selectedProvider = providers[index];
     } else {
-      console.log(chalk.red('Invalid choice. Please enter 1-5.'));
+      console.log(chalk.red(`Invalid choice. Please enter 1-${providers.length}.`));
     }
   }
   
@@ -764,11 +782,14 @@ ${chalk.cyan.bold('╚═══════════════════�
   console.log(chalk.cyan.bold('Step 2: Enter your API key\n'));
   
   const keyHints = {
+    groq: 'Starts with gsk_... (https://console.groq.com)',
+    gemini: 'Your Gemini API key (https://aistudio.google.com/apikey)',
+    mistral: 'Your Mistral API key (https://console.mistral.ai)',
+    openrouter: 'Starts with sk-or-... (https://openrouter.ai/keys)',
+    zai: 'Your Z.AI API key (Discord /key command)',
     openai: 'Starts with sk-...',
     anthropic: 'Starts with sk-ant-...',
     google: 'Your Google AI API key',
-    groq: 'Starts with gsk_...',
-    zai: 'Your Z.AI API key',
   };
   
   console.log(chalk.gray(`Hint: ${keyHints[selectedProvider]}\n`));

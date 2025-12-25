@@ -2,7 +2,8 @@ import Anthropic from '@anthropic-ai/sdk';
 import { BaseProvider } from './base.js';
 
 /**
- * Anthropic Claude Provider Implementation
+ * Anthropic Claude Provider
+ * https://anthropic.com
  */
 export class AnthropicProvider extends BaseProvider {
   constructor(config = {}) {
@@ -13,9 +14,6 @@ export class AnthropicProvider extends BaseProvider {
     });
   }
 
-  /**
-   * Format tools for Anthropic tool use
-   */
   formatTools(tools) {
     return tools.map((tool) => ({
       name: tool.name,
@@ -24,64 +22,14 @@ export class AnthropicProvider extends BaseProvider {
     }));
   }
 
-  /**
-   * Convert messages to Anthropic format
-   */
-  convertMessages(messages) {
-    const converted = [];
-    let systemPrompt = '';
-
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        systemPrompt = msg.content;
-      } else if (msg.role === 'tool') {
-        // Anthropic uses tool_result in user message
-        converted.push({
-          role: 'user',
-          content: [
-            {
-              type: 'tool_result',
-              tool_use_id: msg.tool_call_id,
-              content: msg.content,
-            },
-          ],
-        });
-      } else if (msg.role === 'assistant' && msg.tool_calls) {
-        // Convert tool calls to Anthropic format
-        const content = [];
-        if (msg.content) {
-          content.push({ type: 'text', text: msg.content });
-        }
-        for (const tc of msg.tool_calls) {
-          content.push({
-            type: 'tool_use',
-            id: tc.id,
-            name: tc.name,
-            input: tc.arguments,
-          });
-        }
-        converted.push({ role: 'assistant', content });
-      } else {
-        converted.push({
-          role: msg.role,
-          content: msg.content,
-        });
-      }
-    }
-
-    return { messages: converted, system: systemPrompt };
-  }
-
-  /**
-   * Send chat completion request
-   */
   async chat(messages, options = {}) {
-    const { messages: convertedMessages, system } = this.convertMessages(messages);
+    // Convert OpenAI format to Anthropic format
+    const { system, anthropicMessages } = this.convertMessages(messages);
 
     const params = {
       model: this.model,
-      messages: convertedMessages,
       max_tokens: options.maxTokens || 4096,
+      messages: anthropicMessages,
     };
 
     if (system) {
@@ -96,16 +44,13 @@ export class AnthropicProvider extends BaseProvider {
     return this.normalizeResponse(response);
   }
 
-  /**
-   * Stream chat completion
-   */
   async *stream(messages, options = {}) {
-    const { messages: convertedMessages, system } = this.convertMessages(messages);
+    const { system, anthropicMessages } = this.convertMessages(messages);
 
     const params = {
       model: this.model,
-      messages: convertedMessages,
       max_tokens: options.maxTokens || 4096,
+      messages: anthropicMessages,
       stream: true,
     };
 
@@ -119,42 +64,47 @@ export class AnthropicProvider extends BaseProvider {
 
     const stream = await this.client.messages.stream(params);
 
-    let currentToolUse = null;
-    let toolUses = [];
+    let accumulatedToolCalls = [];
+    let currentToolInput = '';
+    let currentToolId = null;
+    let currentToolName = null;
 
     for await (const event of stream) {
-      if (event.type === 'content_block_start') {
-        if (event.content_block.type === 'tool_use') {
-          currentToolUse = {
-            id: event.content_block.id,
-            name: event.content_block.name,
-            arguments: '',
-          };
-        }
-      } else if (event.type === 'content_block_delta') {
+      if (event.type === 'content_block_delta') {
         if (event.delta.type === 'text_delta') {
-          yield {
-            type: 'content',
-            content: event.delta.text,
-          };
-        } else if (event.delta.type === 'input_json_delta' && currentToolUse) {
-          currentToolUse.arguments += event.delta.partial_json;
+          yield { type: 'content', content: event.delta.text };
+        } else if (event.delta.type === 'input_json_delta') {
+          currentToolInput += event.delta.partial_json;
+        }
+      } else if (event.type === 'content_block_start') {
+        if (event.content_block.type === 'tool_use') {
+          currentToolId = event.content_block.id;
+          currentToolName = event.content_block.name;
+          currentToolInput = '';
         }
       } else if (event.type === 'content_block_stop') {
-        if (currentToolUse) {
-          toolUses.push({
-            id: currentToolUse.id,
-            name: currentToolUse.name,
-            arguments: JSON.parse(currentToolUse.arguments || '{}'),
-          });
-          currentToolUse = null;
+        if (currentToolId && currentToolName) {
+          try {
+            accumulatedToolCalls.push({
+              id: currentToolId,
+              name: currentToolName,
+              arguments: currentToolInput ? JSON.parse(currentToolInput) : {},
+            });
+          } catch {
+            accumulatedToolCalls.push({
+              id: currentToolId,
+              name: currentToolName,
+              arguments: {},
+            });
+          }
+          currentToolId = null;
+          currentToolName = null;
+          currentToolInput = '';
         }
       } else if (event.type === 'message_stop') {
-        if (toolUses.length > 0) {
-          yield {
-            type: 'tool_calls',
-            toolCalls: toolUses,
-          };
+        if (accumulatedToolCalls.length > 0) {
+          yield { type: 'tool_calls', toolCalls: accumulatedToolCalls };
+          accumulatedToolCalls = [];
         }
         yield { type: 'done' };
       }
@@ -162,8 +112,54 @@ export class AnthropicProvider extends BaseProvider {
   }
 
   /**
-   * Normalize response to common format
+   * Convert OpenAI message format to Anthropic format
    */
+  convertMessages(messages) {
+    let system = '';
+    const anthropicMessages = [];
+
+    for (const msg of messages) {
+      if (msg.role === 'system') {
+        system += (system ? '\n' : '') + msg.content;
+      } else if (msg.role === 'user') {
+        anthropicMessages.push({ role: 'user', content: msg.content });
+      } else if (msg.role === 'assistant') {
+        if (msg.tool_calls) {
+          // Assistant with tool calls
+          const content = [];
+          if (msg.content) {
+            content.push({ type: 'text', text: msg.content });
+          }
+          for (const tc of msg.tool_calls) {
+            content.push({
+              type: 'tool_use',
+              id: tc.id,
+              name: tc.function?.name || tc.name,
+              input: typeof tc.function?.arguments === 'string' 
+                ? JSON.parse(tc.function.arguments) 
+                : tc.arguments || {},
+            });
+          }
+          anthropicMessages.push({ role: 'assistant', content });
+        } else {
+          anthropicMessages.push({ role: 'assistant', content: msg.content });
+        }
+      } else if (msg.role === 'tool') {
+        // Tool result
+        anthropicMessages.push({
+          role: 'user',
+          content: [{
+            type: 'tool_result',
+            tool_use_id: msg.tool_call_id,
+            content: msg.content,
+          }],
+        });
+      }
+    }
+
+    return { system, anthropicMessages };
+  }
+
   normalizeResponse(response) {
     let content = '';
     const toolCalls = [];
@@ -185,27 +181,21 @@ export class AnthropicProvider extends BaseProvider {
       toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
       finishReason: response.stop_reason,
       usage: {
-        prompt_tokens: response.usage.input_tokens,
-        completion_tokens: response.usage.output_tokens,
-        total_tokens: response.usage.input_tokens + response.usage.output_tokens,
+        prompt_tokens: response.usage?.input_tokens,
+        completion_tokens: response.usage?.output_tokens,
       },
     };
   }
 
-  /**
-   * Parse tool calls from response
-   */
   parseToolCalls(response) {
     return response.toolCalls || [];
   }
 
-  /**
-   * Format tool result for next request
-   */
-  formatToolResult(toolCallId, _toolName, result) {
+  formatToolResult(toolCallId, toolName, result) {
     return {
       role: 'tool',
       tool_call_id: toolCallId,
+      name: toolName,
       content: typeof result === 'string' ? result : JSON.stringify(result),
     };
   }
