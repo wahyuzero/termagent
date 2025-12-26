@@ -2,50 +2,108 @@
 
 **AI Coding Agent for Terminal** - A ~~powerful~~ *somewhat functional* AI assistant that can read, write, and execute code directly in your terminal. Built with 2 hands, remaining brain cells, coffee, and questionable life choices.
 
+> 🎯 **The poor man's Claude Code** - Because $20/month is basically a whole week of my food budget
+
 ![Node.js](https://img.shields.io/badge/Node.js-20+-green?logo=node.js)
 ![License](https://img.shields.io/badge/License-MIT-blue)
 ![Tested On](https://img.shields.io/badge/Tested%20On-Potato%20Phone-orange)
+![RAM Required](https://img.shields.io/badge/RAM-2GB%20minimum-red)
 
 ## ✨ Features
 
+### Core Features
 - 🔌 **Multi-Provider Support** - Groq, Gemini, Mistral, OpenRouter, ZAI, OpenAI, Anthropic
-- 🛠️ **Tool Execution** - Read/write files, run commands, search code
 - 💬 **Interactive Chat** - Conversational coding with context awareness
 - 📝 **Session Management** - Save and continue conversations
 - ⚡ **Free Tier Friendly** - Works great with free API providers
 - 🔐 **Safe by Default** - Command confirmation before dangerous operations
-- 🥔 **Potato Phone Tested** - If it runs on Redmi 14C, maybe it runs anywhere
+- 🔄 **Auto-Continue** - AI automatically continues long tasks
 
-## � Tested Environment
+### v1.1.0 - New Features 🆕
+
+| Feature | Description | Potato Risk 🥔 |
+|---------|-------------|----------------|
+| **MCP Integration** | Model Context Protocol support | ⚠️ Medium |
+| **Plugin System** | Custom tools from `~/.termagent/plugins/` | ✅ Safe |
+| **Docker Tools** | Container management | 💀 HIGH |
+| **Security Tools** | Audit, hash, secret scanning | ✅ Safe |
+| **HTTP Testing** | API testing & URL checking | ✅ Safe |
+| **Test Runner** | Jest, PyTest, Mocha support | ⚠️ Medium |
+| **Build Tools** | npm run build, dev servers | ⚠️ Medium |
+| **Web Search** | DuckDuckGo integration | ✅ Safe |
+| **Cost Tracking** | Token & cost estimation | ✅ Safe |
+| **LSP Tools** | Code diagnostics & symbols | ✅ Safe |
+
+## 🥔 Tested Environment
 
 > *"If it works on a potato, maybe it works everywhere"* - Frugal Developer Proverb
 
 - **Device**: Redmi 14C (yes, that budget phone your uncle and cousin has)
-- **Environment**: Termux
+- **Environment**: Arch, Ubuntu, Termux (from F-Droid, not that cursed Play Store version)
 - **Node.js**: v24
-- **Tested Models**: Llama 3.3, GLM-4, Deepseek
+- **Primary Testing Model**: ZAI GLM-4.7 *(more on this below)*
+- **Also Tested**: Llama 3.3 (Groq), Deepseek
 - **Other models**: *You test them yourself, I'm not your QA team* 🙃
 
-## �🚀 Quick Start
+> 🤡 **The Irony Section**
+>
+> Yes, I mostly tested this with **ZAI** which is a **paid** service that's basically 
+> Claude Code's Asian cousin. I already had a subscription, so... here we are.
+>
+> *"I paid for a Claude Code alternative, then built a free Claude Code alternative"*
+> — Me, questioning my life choices at 3 AM
+>
+> The good news: This thing works great with **free** providers like Groq, Gemini, and Mistral.
+> So you don't have to repeat my financial mistakes. You're welcome. 🎁
+
+## � WARNING: POTATO PHONE USERS READ THIS
+
+> ⚠️ **FEATURES THAT MAY CAUSE YOUR PHONE TO ASCEND TO PHONE HEAVEN**
+
+### 💀 HIGH RISK - May Cause Spontaneous Phone Combustion
+
+| Feature | Why It's Dangerous | Alternative |
+|---------|-------------------|-------------|
+| `docker_build` | Building images = RAM go BRRRR | Use cloud CI/CD |
+| `docker_compose up` | Multiple containers = multiple problems | Just... don't |
+| `project_dev` + Hot Reload | Watching files = infinite pain | Use `node server.js` directly |
+| `run_tests` on large project | 500 tests = 500 reasons to cry | Test one file at a time |
+| MCP with 3+ servers | Each server = subprocess = RAM | Use 1 server max |
+
+### ⚠️ MEDIUM RISK - Proceed with Caution
+
+| Feature | Symptoms | Mitigation |
+|---------|----------|------------|
+| `npm audit` | Slow, memory spike | Close other apps first |
+| `security_audit` | Scans everything | Be patient |
+| `directory_tree` (deep) | Lots of files = lots of RAM | Limit depth |
+| Long AI conversations | Context grows = memory grows | `/new` session periodically |
+
+### ✅ SAFE - Even Grandma's Nokia 3310 Can Handle
+
+- `read_file`, `write_file` - Basic stuff
+- `git_status`, `git_diff` - Just text
+- `hash_file`, `hash_text` - Math is free
+- `http_check` - One request
+- `/help`, `/exit` - Literally doing nothing
+
+## 🚀 Quick Start
+
+> 📱 **TERMUX USERS**: Install Termux from **F-Droid**, NOT Google Play Store!
+> The Play Store version is abandoned and will cause you nothing but pain and suffering.
+> 
+> F-Droid: https://f-droid.org/packages/com.termux/
 
 ### Installation
 
-Clone repository
-
 ```bash
+# First, update and install Node.js
+pkg update && pkg install nodejs-lts git
+
+# Then install TermAgent
 git clone https://github.com/wahyuzero/termagent.git
 cd termagent
-```
-
-Install dependencies
-
-```bash
 npm install
-```
-
-Link globally
-
-```bash
 npm link
 ```
 
@@ -62,80 +120,156 @@ Get a free API key from one of these providers:
 # Set API key
 export GROQ_API_KEY="gsk_your_key_here"
 
-# Or run setup wizard
+# Or run setup
 termagent config
 ```
 
 ### Start Chatting
 
-Open folder where you want to chat with agent and run:
-
 ```bash
 termagent
 ```
 
-## 📖 Usage
+## 📦 Optional Termux Packages
+
+Some features need extra packages. Install ONLY what you need:
+
+### Essential (Recommended)
+
+```bash
+# Already installed if you have Node.js
+pkg install nodejs-lts git
+```
+
+### For Docker Tools 🐳
+
+> ⚠️ **ABANDON ALL HOPE, YE WHO ENTER HERE**
+>
+> Docker on Termux is like trying to fit an elephant into a Mini Cooper.
+> It's technically possible, but why would you do this to yourself?
+
+**Option 1: The Masochist's Path (Full Docker)** 💀
+
+Follow this guide if you have:
+- 3+ hours of free time
+- A strong will to live
+- Lots of patience
+- Perhaps a therapist on speed dial
+
+📖 **Guide**: https://github.com/cyberkernelofficial/docker-in-termux
+
+**Option 2: The Sane Person's Choice (uDocker)** ✅
+
+```bash
+# Much simpler, doesn't require root
+pkg install udocker
+
+# Then tell the AI to use udocker instead of docker:
+# "hey, use udocker instead of docker commands"
+# The AI is smart enough to figure it out... probably
+```
+
+> 📝 **Note**: uDocker integration not fully tested yet.
+> You're basically a beta tester. Congratulations! 🎉
+
+**Option 3: The Smart Choice** 🧠
+
+```bash
+# Just use Docker on your PC and SSH into it
+pkg install openssh
+# Let the potato phone be a potato phone
+```
+
+### For Python Projects 🐍
+
+```bash
+pkg install python
+pip install pytest pip-audit
+```
+
+### For Security Scanning 🔒
+
+```bash
+# For pip-audit (Python security)
+pip install pip-audit
+
+# npm audit works out of the box
+```
+
+### For LSP/Code Intelligence 🧠
+
+```bash
+# Basic syntax checking - no extra packages needed
+# Uses node --check and python -m py_compile
+```
+
+### For Build Tools 🔧
+
+```bash
+# Most build tools are npm packages
+npm install -g typescript webpack vite  # If needed
+```
+
+### For MCP (Model Context Protocol) �
+
+```bash
+# MCP servers are installed via npx
+# Example: npx -y @modelcontextprotocol/server-filesystem /home
+```
+
+## �📖 Usage
 
 ### Commands
 
-| Command        | Shortcut | Description        |
-| -------------- | -------- | ------------------ |
-| `/help`        | `/h`     | Show help          |
-| `/exit`        | `/q`     | Exit chat          |
-| `/files`       | `/f`     | List files         |
-| `/read <file>` | `/r`     | Read file          |
-| `/run <cmd>`   | `/x`     | Run command        |
-| `/undo`        | `/u`     | Undo last change   |
-| `/diff`        | `/d`     | Show changes       |
-| `/tokens`      | `/t`     | Token usage        |
-| `/provider`    | `/p`     | Switch provider    |
-| `/export`      | `/e`     | Export to markdown |
-| `/status`      |          | Session status     |
+| Command | Shortcut | Description |
+|---------|----------|-------------|
+| `/help` | `/h` | Show help |
+| `/exit` | `/q` | Exit chat |
+| `/new` | - | New session |
+| `/files` | `/f` | List files |
+| `/read <file>` | `/r` | Read file |
+| `/run <cmd>` | `/x` | Run command |
+| `/undo` | `/u` | Undo last change |
+| `/diff` | `/d` | Show changes |
+| `/tokens` | `/t` | Token usage |
+| `/provider` | `/p` | Switch provider |
+| `/export` | `/e` | Export to markdown |
+| `/status` | - | Session status |
 
-### Interactive Features
-
-- **Arrow ↑/↓** → Navigate command history
-- **Type `a` at confirmation** → Always-allow command for session
-- **Git branch in prompt** → Shows current branch (e.g., `main* >`)
-
-### Example Session
+### Tool Categories
 
 ```
-main* > Create hello.js that print hello world
-
-⛬  Response:
-I will create hello.js for you.
-
-   WRITE  (hello.js)
-   ↳ File written successfully
-
-main* > Run the file
-
-   RUN  (node hello.js)
-   ⚠ Command requires confirmation:
-   $ node hello.js
-   Allow? (y/n/a=always): y
-   ✓ Allowed
-   ↳ Hello, World!
+📁 File Operations    - read, write, edit, list, find
+🐚 Shell Commands     - run_command (with safety checks)
+🔍 Search             - grep, code search, definitions
+📋 Git                - status, diff, log, commit, branch
+🌐 Web                - web_search (DuckDuckGo)
+🐳 Docker             - ps, build, run, compose
+🔒 Security           - audit, hash, secrets scan
+🌍 HTTP               - request, check, headers
+🧪 Testing            - run tests, list tests
+🔧 Build              - build, dev, install, scripts
+🤖 MCP                - connect, list MCP servers
+🧩 Plugins            - custom tools from ~/.termagent/plugins/
 ```
 
 ## 🔧 Supported Providers
 
 ### Free Tier
 
-| Provider       | Models                        | Get Key                                                   |
-| -------------- | ----------------------------- | --------------------------------------------------------- |
-| **Groq**       | Llama 3.3 70B, Mixtral, Gemma | [console.groq.com](https://console.groq.com)              |
-| **Gemini**     | Gemini 1.5/2.0 Flash/Pro      | [aistudio.google.com](https://aistudio.google.com/apikey) |
-| **Mistral**    | Mistral Small/Large           | [console.mistral.ai](https://console.mistral.ai)          |
-| **OpenRouter** | 60+ models                    | [openrouter.ai](https://openrouter.ai/keys)               |
+| Provider | Models | Get Key |
+|----------|--------|---------|
+| **Groq** | Llama 3.3 70B, Mixtral, Gemma | [console.groq.com](https://console.groq.com) |
+| **Gemini** | Gemini 1.5/2.0 Flash/Pro | [aistudio.google.com](https://aistudio.google.com/apikey) |
+| **Mistral** | Mistral Small/Large | [console.mistral.ai](https://console.mistral.ai) |
+| **OpenRouter** | 60+ models | [openrouter.ai](https://openrouter.ai/keys) |
 
 ### Paid *(or "free if you know the right people")*
 
-| Provider      | Models                 |
-| ------------- | ---------------------- |
-| **ZAI**       | GLM-4, GPT-4o-mini, Claude |
-| **OpenAI**    | GPT-4o, GPT-4 Turbo    |
+| Provider | Models |
+|----------|--------|
+| **ZAI** | GLM-4, GPT-4o-mini, Claude |
+| **OpenAI** | GPT-4o, GPT-4 Turbo |
 | **Anthropic** | Claude 3.5 Sonnet/Opus |
 
 ## ⚙️ Configuration
@@ -152,16 +286,35 @@ termagent -p groq -m llama-3.3-70b-versatile "your message"
 termagent --continue  # Continue last session
 ```
 
-### Environment Variables
+### MCP Configuration
 
-```bash
-export GROQ_API_KEY="gsk_..."
-export GEMINI_API_KEY="..."
-export MISTRAL_API_KEY="..."
-export OPENROUTER_API_KEY="sk-or-..."
-export ZAI_API_KEY="..."
-export OPENAI_API_KEY="sk-..."
-export ANTHROPIC_API_KEY="sk-ant-..."
+Create `~/.termagent/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home"]
+    }
+  }
+}
+```
+
+### Plugin Development
+
+Create `~/.termagent/plugins/my-plugin.js`:
+
+```javascript
+export const definitions = [{
+  name: 'my_tool',
+  description: 'Does something cool',
+  parameters: { type: 'object', properties: {} }
+}];
+
+export async function execute(name, args) {
+  return { success: true, message: 'Hello from plugin!' };
+}
 ```
 
 ## 🛡️ Security
@@ -169,12 +322,17 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 - API keys stored in `~/.termagent/`
 - Dangerous commands require confirmation
 - Use `a` (always) to auto-allow safe commands per session
+- `scan_secrets` can detect API keys in your code
 
 ## 📋 Requirements
 
-- Node.js 20+ (tested on v24)
-- Any terminal with ANSI color support
-- A device with at least 2 brain cells worth of RAM
+| Requirement | Minimum | Recommended |
+|-------------|---------|-------------|
+| **Node.js** | 18+ | 20+ |
+| **RAM** | 2 GB | 4 GB |
+| **Storage** | 100 MB | 500 MB |
+| **Brain Cells** | 2 | Any amount |
+
 
 ## 🐛 Issues & Support
 
@@ -190,4 +348,6 @@ MIT © wahyuzero
 
 ---
 
-*Made with 2 hands and probably too much caffeine*
+*Made with 2 hands, probably too much caffeine, and the burning desire to not pay $20/month for Claude Code*
+
+> 🥔 *"My phone is a potato, but at least it's MY potato running an AI agent"*

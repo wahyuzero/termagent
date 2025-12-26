@@ -53,6 +53,22 @@ You have access to the following tools:
 
 7. **Verify changes**: After making changes, you can use grep or read to verify they worked.
 
+## 🚀 EFFICIENCY RULES (IMPORTANT)
+
+To minimize API calls and costs, follow these rules:
+
+1. **Plan before acting**: Think about ALL tools you need, then execute them in optimal order.
+
+2. **Batch related operations**: If you need to read multiple related files, mention them all in your reasoning, then call them.
+
+3. **Avoid redundant reads**: If you already read a file in this conversation, don't read it again unless you expect it changed.
+
+4. **Complete tasks in one turn**: Don't spread simple tasks across multiple responses. Execute all necessary tools to complete the task.
+
+5. **Cache mental state**: Remember file contents and project structure from previous reads - don't re-read unnecessarily.
+
+6. **Summarize, don't repeat**: When referencing previous content, summarize instead of quoting entire files.
+
 ## Current Environment
 
 - Working Directory: ${workingDirectory || process.cwd()}

@@ -180,11 +180,18 @@ export async function execute(name, args, options = {}) {
 function runCommand(command, options = {}) {
   return new Promise((resolve, reject) => {
     const { cwd = process.cwd(), timeout = 30000 } = options;
+    
+    // Detect background commands
+    const isBackground = command.trim().endsWith('&');
+    // Use shorter timeout for background commands (just wait for startup)
+    const effectiveTimeout = isBackground ? 3000 : timeout;
 
     const child = spawn('sh', ['-c', command], {
       cwd,
       env: { ...process.env, TERM: 'dumb' },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // For background commands, detach from parent
+      detached: isBackground,
     });
 
     let stdout = '';
@@ -193,9 +200,24 @@ function runCommand(command, options = {}) {
 
     const timer = setTimeout(() => {
       killed = true;
-      child.kill('SIGTERM');
-      setTimeout(() => child.kill('SIGKILL'), 1000);
-    }, timeout);
+      if (isBackground) {
+        // For background commands, "timeout" is expected - process is running
+        child.unref(); // Allow parent to exit without waiting
+        resolve({
+          success: true,
+          command,
+          background: true,
+          message: 'Background process started',
+          stdout: stdout.trim(),
+          stderr: stderr.trim(),
+          pid: child.pid,
+        });
+      } else {
+        // For foreground commands, timeout is an error
+        child.kill('SIGTERM');
+        setTimeout(() => child.kill('SIGKILL'), 1000);
+      }
+    }, effectiveTimeout);
 
     child.stdout.on('data', (data) => {
       stdout += data.toString();
@@ -215,10 +237,10 @@ function runCommand(command, options = {}) {
     child.on('close', (code) => {
       clearTimeout(timer);
 
-      if (killed) {
+      if (killed && !isBackground) {
         resolve({
           success: false,
-          error: `Command timed out after ${timeout}ms`,
+          error: `Command timed out after ${effectiveTimeout}ms`,
           command,
           stdout: stdout.trim(),
           stderr: stderr.trim(),

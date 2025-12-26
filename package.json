@@ -1,7 +1,7 @@
 {
   "name": "termagent",
-  "version": "1.0.0",
-  "description": "AI Coding Agent for Terminal - Multi-provider assistant with tool execution",
+  "version": "1.1.0",
+  "description": "AI Coding Agent for Terminal - Multi-provider assistant with tool execution, MCP support, and plugins",
   "type": "module",
   "main": "src/index.js",
   "bin": {
@@ -32,7 +32,12 @@
     "claude",
     "gpt",
     "code-generation",
-    "automation"
+    "automation",
+    "mcp",
+    "model-context-protocol",
+    "plugins",
+    "tools",
+    "web-search"
   ],
   "author": "wxsys",
   "license": "MIT",

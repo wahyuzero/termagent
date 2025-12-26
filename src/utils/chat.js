@@ -13,6 +13,7 @@ import { autoSave, loadLastSession, newConversation, getMessages } from '../conv
 import { executeTool } from '../tools/index.js';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
+import costTracker from './cost.js';
 
 // Configure marked for terminal rendering
 marked.setOptions({
@@ -112,10 +113,17 @@ export class ChatRepl {
     this.agent = null;
     this.rl = null;
     this.spinner = null;
+    this.elapsedInterval = null;  // For clearing "Thinking..." timer
     this.tokenUsage = { prompt: 0, completion: 0 };
     this.pendingTasks = [];
     this.commandHistory = [];
     this.maxHistorySize = 100;
+    
+    // Auto-continue settings
+    this.autoContinue = true;          // Enable auto-continue
+    this.autoContinueMax = 8;           // Max auto-continue attempts
+    this.autoContinueCount = 0;         // Current attempt count
+    this.lastToolCallCount = 0;         // Track if AI was doing tool calls
   }
 
   /**
@@ -265,7 +273,7 @@ export class ChatRepl {
    */
   printWelcome() {
     console.log(chalk.cyan.bold('\n╔═══════════════════════════════════════╗'));
-    console.log(chalk.cyan.bold('║') + chalk.white.bold('  🤖 TermAgent Interactive Mode       ') + chalk.cyan.bold('║'));
+    console.log(chalk.cyan.bold('║') + chalk.white.bold('  🤖 TermAgent Interactive Mode        ') + chalk.cyan.bold('║'));
     console.log(chalk.cyan.bold('╚═══════════════════════════════════════╝\n'));
     
     console.log(chalk.gray(`Provider: ${chalk.cyan(config.getCurrentProvider())} | Model: ${chalk.green(config.getCurrentModel())}`));
@@ -396,15 +404,15 @@ export class ChatRepl {
   async sendMessage(message) {
     this.processing = true;
     this.pendingTasks = [];
+    this.lastToolCallCount = 0;  // Reset tool call counter
     
     // Elapsed time counter
     const startTime = Date.now();
-    let elapsedInterval = null;
     
     // Show thinking with elapsed time
     process.stdout.write(chalk.cyan('\n⛬  ') + chalk.gray('Thinking... '));
     
-    elapsedInterval = setInterval(() => {
+    this.elapsedInterval = setInterval(() => {
       const elapsed = Math.floor((Date.now() - startTime) / 1000);
       process.stdout.write(`\r${chalk.cyan('⛬  ')}${chalk.gray('Thinking...')} ${chalk.yellow(`${elapsed}s`)}`);
     }, 1000);
@@ -420,9 +428,9 @@ export class ChatRepl {
       for await (const chunk of this.agent.chat(message)) {
         if (chunk.type === 'content') {
           // Stop elapsed timer on first content
-          if (elapsedInterval) {
-            clearInterval(elapsedInterval);
-            elapsedInterval = null;
+          if (this.elapsedInterval) {
+            clearInterval(this.elapsedInterval);
+            this.elapsedInterval = null;
           }
           
           if (!hasContent) {
@@ -457,12 +465,18 @@ export class ChatRepl {
         } else if (chunk.type === 'usage') {
           this.tokenUsage.prompt += chunk.promptTokens || 0;
           this.tokenUsage.completion += chunk.completionTokens || 0;
+          // Track costs
+          costTracker.track(
+            config.getCurrentProvider(),
+            chunk.promptTokens,
+            chunk.completionTokens
+          );
         } else if (chunk.type === 'error') {
-          if (elapsedInterval) clearInterval(elapsedInterval);
+          if (this.elapsedInterval) clearInterval(this.elapsedInterval);
           process.stdout.write('\r\x1b[K');
           console.log(chalk.red(`\n${formatError({message: chunk.error})}\n`));
         } else if (chunk.type === 'done') {
-          if (elapsedInterval) clearInterval(elapsedInterval);
+          if (this.elapsedInterval) clearInterval(this.elapsedInterval);
           
           // Render any remaining markdown
           if (pendingMarkdown.trim()) {
@@ -478,6 +492,12 @@ export class ChatRepl {
             console.log(''); // End with newline
           }
           
+          // Show cost footer
+          const costFooter = costTracker.getCostFooter();
+          if (costFooter) {
+            console.log(chalk.gray(`   ${costFooter}\n`));
+          }
+          
           // Show pending tasks if any
           if (this.pendingTasks.length > 0) {
             this.showPendingTasks();
@@ -485,10 +505,27 @@ export class ChatRepl {
           
           // Auto-save
           await autoSave();
+          
+          // Check if we should auto-continue
+          if (this.autoContinue && this.shouldAutoContinue(response, this.lastToolCallCount)) {
+            if (this.autoContinueCount < this.autoContinueMax) {
+              this.autoContinueCount++;
+              console.log(chalk.gray(`   ⟳ Auto-continuing (${this.autoContinueCount}/${this.autoContinueMax})...\n`));
+              this.processing = false;
+              // Recursively continue
+              await this.sendMessage('continue');
+              return;
+            } else {
+              console.log(chalk.gray(`   ℹ Auto-continue limit reached. Type "continue" to continue manually.\n`));
+            }
+          } else {
+            // Reset counter on successful complete response
+            this.autoContinueCount = 0;
+          }
         }
       }
     } catch (error) {
-      if (elapsedInterval) clearInterval(elapsedInterval);
+      if (this.elapsedInterval) clearInterval(this.elapsedInterval);
       process.stdout.write('\r\x1b[K'); // Clear line
       console.log(chalk.red(`\n${formatError(error)}\n`));
     }
@@ -502,11 +539,49 @@ export class ChatRepl {
     
     this.processing = false;
   }
+  
+  /**
+   * Detect if response is incomplete and should auto-continue
+   */
+  shouldAutoContinue(response, toolCallCount) {
+    // Don't continue if no activity
+    if (!response && toolCallCount === 0) return false;
+    
+    // Detect incomplete patterns (Indonesian & English)
+    const incompletePatterns = [
+      /mari (kita )?lanjut/i,
+      /selanjutnya/i,
+      /let('s| me) continue/i,
+      /next,? (I('ll| will)|we)/i,
+      /sekarang (saya|kita) akan/i,
+      /now (I('ll| will)|let me)/i,
+      /\.{3}\s*$/,  // Ends with ...
+    ];
+    
+    for (const pattern of incompletePatterns) {
+      if (pattern.test(response)) return true;
+    }
+    
+    // If there were tool calls but very short/no response, likely more to do
+    if (toolCallCount > 2 && response.length < 50) return true;
+    
+    return false;
+  }
 
   /**
    * Handle tool call with modern display
    */
   handleToolCall(tc) {
+    // Track tool calls for auto-continue detection
+    this.lastToolCallCount++;
+    
+    // Clear elapsed timer when tool call starts
+    if (this.elapsedInterval) {
+      clearInterval(this.elapsedInterval);
+      this.elapsedInterval = null;
+      process.stdout.write('\r\x1b[K'); // Clear the 'Thinking...' line
+    }
+    
     if (this.spinner && this.spinner.isSpinning) {
       this.spinner.stop();
     }
@@ -590,6 +665,13 @@ export class ChatRepl {
    * Confirm dangerous command with always-allow option
    */
   async confirmCommand(cmd, reason) {
+    // Clear elapsed timer before showing prompt
+    if (this.elapsedInterval) {
+      clearInterval(this.elapsedInterval);
+      this.elapsedInterval = null;
+      process.stdout.write('\r\x1b[K'); // Clear the 'Thinking...' line
+    }
+    
     if (this.spinner) this.spinner.stop();
     
     // Initialize session allowed patterns if needed

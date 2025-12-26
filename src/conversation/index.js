@@ -1,10 +1,18 @@
 import { readFile, writeFile, mkdir, readdir, stat, unlink } from 'fs/promises';
 import { join, basename } from 'path';
 import config from '../config/index.js';
+import { logMessages, analyzeMessages } from '../utils/debug.js';
 
 const MAX_HISTORY_MESSAGES = 100;
 const SESSION_FILE = 'current_session.json';
 const MAX_SESSIONS = 10;
+
+// Token management constants - more aggressive for API compatibility
+const MAX_CONTEXT_TOKENS = 8000;    // Lower limit to stay safe
+const TOKENS_PER_CHAR = 0.25;       // Rough estimate: 4 chars = 1 token
+const KEEP_RECENT_MESSAGES = 6;     // Keep fewer messages (3 user + 3 assistant rounds)
+const TRUNCATE_TOOL_RESULTS = 500;  // Shorter tool results
+const MAX_TOOL_MESSAGES = 20;       // Max tool messages to keep
 
 /**
  * Conversation manager for storing and retrieving chat history
@@ -62,13 +70,17 @@ export class ConversationManager {
    * Add assistant message with potential tool calls
    */
   addAssistantMessage(content, toolCalls = null) {
+    const hasToolCalls = toolCalls && toolCalls.length > 0;
+    
     const message = {
       role: 'assistant',
-      content,
+      // GLM/ZAI requires null content when using tool_calls, not empty string
+      // But needs content (even empty) when no tool_calls
+      content: hasToolCalls ? (content || null) : (content || ''),
       timestamp: new Date().toISOString(),
     };
 
-    if (toolCalls && toolCalls.length > 0) {
+    if (hasToolCalls) {
       message.tool_calls = toolCalls.map((tc) => ({
         id: tc.id,
         type: 'function',
@@ -85,26 +97,130 @@ export class ConversationManager {
   }
 
   /**
-   * Get messages formatted for AI provider
+   * Estimate token count for a message
+   */
+  estimateTokens(content) {
+    if (!content) return 0;
+    const str = typeof content === 'string' ? content : JSON.stringify(content);
+    return Math.ceil(str.length * TOKENS_PER_CHAR);
+  }
+
+  /**
+   * Get messages formatted for AI provider with context pruning
+   * IMPORTANT: Must maintain valid tool_call chains (assistant with tool_calls → tool results)
    */
   getMessages() {
-    return this.messages.map((msg) => {
-      const formatted = {
+    // First pass: format all messages
+    const formatted = this.messages.map((msg, idx) => {
+      // GLM/ZAI specific: null content for assistant with tool_calls, else use content or empty string
+      let content;
+      if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        content = msg.content || null;  // null for assistant with tool_calls
+      } else {
+        content = msg.content ?? '';    // empty string for others
+      }
+      
+      const base = {
         role: msg.role,
-        content: msg.content,
+        content,
+        _idx: idx,  // Track original index for chain detection
       };
 
       if (msg.tool_call_id) {
-        formatted.tool_call_id = msg.tool_call_id;
-        formatted.name = msg.name;
+        base.tool_call_id = msg.tool_call_id;
+        base.name = msg.name;
       }
 
       if (msg.tool_calls) {
-        formatted.tool_calls = msg.tool_calls;
+        base.tool_calls = msg.tool_calls;
       }
 
-      return formatted;
+      return base;
     });
+
+    // Calculate total tokens
+    let totalTokens = formatted.reduce((sum, msg) => sum + this.estimateTokens(msg.content), 0);
+
+    // If under limit, return as-is
+    if (totalTokens <= MAX_CONTEXT_TOKENS && formatted.length <= 50) {
+      return formatted.map(({ _idx, ...msg }) => msg);
+    }
+
+    // === AGGRESSIVE PRUNING ===
+    
+    // Find system message
+    const systemMsg = formatted.find(m => m.role === 'system');
+    
+    // Count tool messages
+    const toolMsgs = formatted.filter(m => m.role === 'tool');
+    const assistantWithToolCalls = formatted.filter(m => m.role === 'assistant' && m.tool_calls);
+    
+    // If too many tool messages, keep only recent ones
+    let pruned = formatted;
+    
+    if (toolMsgs.length > MAX_TOOL_MESSAGES) {
+      // Get IDs of recent tool calls to keep
+      const recentToolCallIds = new Set();
+      const recentAssistants = assistantWithToolCalls.slice(-Math.ceil(MAX_TOOL_MESSAGES / 3));
+      
+      for (const asst of recentAssistants) {
+        if (asst.tool_calls) {
+          for (const tc of asst.tool_calls) {
+            recentToolCallIds.add(tc.id);
+          }
+        }
+      }
+      
+      // Filter: keep system, user messages, recent assistants, and matching tool results
+      pruned = formatted.filter(msg => {
+        if (msg.role === 'system') return true;
+        if (msg.role === 'user') return true;
+        if (msg.role === 'assistant' && !msg.tool_calls) return true;
+        if (msg.role === 'assistant' && msg.tool_calls) {
+          // Keep if any tool call is in recent set
+          return msg.tool_calls.some(tc => recentToolCallIds.has(tc.id));
+        }
+        if (msg.role === 'tool') {
+          return recentToolCallIds.has(msg.tool_call_id);
+        }
+        return true;
+      });
+    }
+    
+    // Truncate remaining tool results if needed
+    pruned = pruned.map(msg => {
+      if (msg.role === 'tool' && msg.content && msg.content.length > TRUNCATE_TOOL_RESULTS) {
+        return {
+          ...msg,
+          content: msg.content.slice(0, TRUNCATE_TOOL_RESULTS) + '\n...[truncated]',
+        };
+      }
+      return msg;
+    });
+
+    // Recalculate tokens
+    totalTokens = pruned.reduce((sum, msg) => sum + this.estimateTokens(msg.content), 0);
+
+    // If still over limit, keep only system + last N messages
+    if (totalTokens > MAX_CONTEXT_TOKENS) {
+      const minimal = [
+        systemMsg,
+        ...pruned.filter(m => m.role !== 'system').slice(-KEEP_RECENT_MESSAGES)
+      ].filter(Boolean);
+      
+      const result = minimal.map(({ _idx, ...msg }) => msg);
+      // Debug log
+      logMessages(result, 'getMessages_minimal').catch(() => {});
+      return result;
+    }
+
+    const result = pruned.map(({ _idx, ...msg }) => msg);
+    // Debug log - only log if there are potential issues
+    const analysis = analyzeMessages(result);
+    if (!analysis.isValid || result.length > 40) {
+      logMessages(result, 'getMessages_pruned').catch(() => {});
+    }
+    return result;
   }
 
   /**

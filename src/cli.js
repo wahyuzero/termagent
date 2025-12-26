@@ -97,7 +97,15 @@ program
   .description('Start interactive chat mode')
   .option('-c, --continue', 'Continue last session')
   .action(async (options) => {
+    const { initTools } = await import('./tools/index.js');
     const { ChatRepl } = await import('./utils/chat.js');
+    
+    // Load plugins
+    const pluginCount = await initTools();
+    if (pluginCount > 0) {
+      console.log(chalk.gray(`Loaded ${pluginCount} plugin(s)`));
+    }
+    
     const repl = new ChatRepl({ continue: options.continue });
     await repl.start();
   });

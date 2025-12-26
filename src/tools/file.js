@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, readdir, stat, unlink, rename } from 'fs/pr
 import { dirname, join, resolve, relative } from 'path';
 import { glob } from 'glob';
 import { diffLines } from 'diff';
+import fileCache from '../utils/cache.js';
 
 // Try to import undo manager (optional)
 let getUndoManager = null;
@@ -199,7 +200,19 @@ export async function execute(name, args) {
 
 async function readFileOp({ path: filePath, startLine, endLine }) {
   const absolutePath = resolve(filePath);
-  const content = await readFile(absolutePath, 'utf-8');
+  
+  // Check cache first (only for full reads without line range)
+  let content;
+  if (!startLine && !endLine) {
+    content = fileCache.get(absolutePath);
+  }
+  
+  // Read from disk if not cached
+  if (!content) {
+    content = await readFile(absolutePath, 'utf-8');
+    // Cache full content for future reads
+    fileCache.set(absolutePath, content);
+  }
 
   if (startLine || endLine) {
     const lines = content.split('\n');
@@ -234,6 +247,9 @@ async function writeFileOp({ path: filePath, content }) {
   // Ensure directory exists
   await mkdir(dir, { recursive: true });
   await writeFile(absolutePath, content, 'utf-8');
+  
+  // Update cache with new content
+  fileCache.set(absolutePath, content);
 
   const lines = content.split('\n').length;
   return {
@@ -278,47 +294,68 @@ async function editFileOp({ path: filePath, search, replace }) {
   };
 }
 
-async function listDirectoryOp({ path: dirPath, recursive = false }) {
+async function listDirectoryOp({ path: dirPath, recursive = false, limit = 50, offset = 0 }) {
   const absolutePath = resolve(dirPath || '.');
+  const maxLimit = Math.min(limit, 100); // Cap at 100
 
   if (recursive) {
     const files = await glob('**/*', {
       cwd: absolutePath,
       nodir: false,
       dot: true,
-      ignore: ['node_modules/**', '.git/**'],
+      ignore: ['node_modules/**', '.git/**', '.termagent/**'],
     });
 
+    const paged = files.slice(offset, offset + maxLimit);
     return {
       success: true,
       path: absolutePath,
-      entries: files.slice(0, 100),
+      entries: paged,
       total: files.length,
-      truncated: files.length > 100,
+      offset,
+      limit: maxLimit,
+      hasMore: offset + maxLimit < files.length,
     };
   }
 
   const entries = await readdir(absolutePath);
-  const detailed = await Promise.all(
-    entries.map(async (entry) => {
-      const fullPath = join(absolutePath, entry);
-      try {
-        const stats = await stat(fullPath);
-        return {
-          name: entry,
-          type: stats.isDirectory() ? 'directory' : 'file',
-          size: stats.isFile() ? stats.size : undefined,
-        };
-      } catch {
-        return { name: entry, type: 'unknown' };
-      }
-    })
-  );
+  const total = entries.length;
+  
+  // Apply pagination
+  const pagedEntries = entries.slice(offset, offset + maxLimit);
+  
+  // Process in batches for better memory usage
+  const batchSize = 20;
+  const detailed = [];
+  
+  for (let i = 0; i < pagedEntries.length; i += batchSize) {
+    const batch = pagedEntries.slice(i, i + batchSize);
+    const batchResults = await Promise.all(
+      batch.map(async (entry) => {
+        const fullPath = join(absolutePath, entry);
+        try {
+          const stats = await stat(fullPath);
+          return {
+            name: entry,
+            type: stats.isDirectory() ? 'directory' : 'file',
+            size: stats.isFile() ? stats.size : undefined,
+          };
+        } catch {
+          return { name: entry, type: 'unknown' };
+        }
+      })
+    );
+    detailed.push(...batchResults);
+  }
 
   return {
     success: true,
     path: absolutePath,
     entries: detailed,
+    total,
+    offset,
+    limit: maxLimit,
+    hasMore: offset + maxLimit < total,
   };
 }
 
