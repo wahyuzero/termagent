@@ -6,7 +6,7 @@
  * + Termux:API app from F-Droid
  */
 
-import { execSync, spawn } from 'child_process';
+import { execSync, spawn, spawnSync } from 'child_process';
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
@@ -105,8 +105,14 @@ export async function clipboardRead() {
   }
   
   try {
-    const result = execSync('termux-clipboard-get', { encoding: 'utf-8', timeout: 5000 });
-    return { success: true, content: result };
+    const result = spawnSync('termux-clipboard-get', [], { 
+      encoding: 'utf-8', 
+      timeout: 5000 
+    });
+    if (result.status === 0) {
+      return { success: true, content: result.stdout };
+    }
+    return { error: result.stderr || 'Failed to read clipboard' };
   } catch (error) {
     return { error: error.message };
   }
@@ -121,16 +127,16 @@ export async function clipboardWrite(text) {
   }
   
   try {
-    const proc = spawn('termux-clipboard-set', [], { stdio: ['pipe', 'pipe', 'pipe'] });
-    proc.stdin.write(text);
-    proc.stdin.end();
-    
-    await new Promise((resolve, reject) => {
-      proc.on('close', (code) => code === 0 ? resolve() : reject(new Error('Failed')));
-      proc.on('error', reject);
+    const result = spawnSync('termux-clipboard-set', [], {
+      input: text,
+      encoding: 'utf-8',
+      timeout: 5000
     });
     
-    return { success: true, message: 'Copied to clipboard' };
+    if (result.status === 0) {
+      return { success: true, message: 'Copied to clipboard' };
+    }
+    return { error: result.stderr || 'Failed to write clipboard' };
   } catch (error) {
     return { error: error.message };
   }
@@ -147,17 +153,22 @@ export async function showToast(message, options = {}) {
   if (!await isEnabled('toast')) return { skipped: true };
   
   try {
+    // Use spawnSync with proper args array (no shell escaping needed)
     const args = [message];
-    if (options.short) args.push('-s');
-    if (options.position) args.push('-g', options.position); // top, middle, bottom
-    if (options.background) args.push('-b', options.background);
-    if (options.color) args.push('-c', options.color);
+    if (options.short) args.unshift('-s');
+    if (options.position) args.unshift('-g', options.position);
+    if (options.background) args.unshift('-b', options.background);
+    if (options.color) args.unshift('-c', options.color);
     
-    execSync(`termux-toast ${args.map(a => `"${a}"`).join(' ')}`, { 
+    const result = spawnSync('termux-toast', args, { 
       encoding: 'utf-8',
-      timeout: 3000 
+      timeout: 5000 
     });
-    return { success: true };
+    
+    if (result.status === 0) {
+      return { success: true };
+    }
+    return { error: result.stderr || 'Toast failed' };
   } catch (error) {
     return { error: error.message };
   }
@@ -170,17 +181,22 @@ export async function showNotification(title, content, options = {}) {
   if (!await isEnabled('notifications')) return { skipped: true };
   
   try {
+    // Build args array properly
     const args = ['-t', title, '-c', content];
     if (options.id) args.push('-i', options.id);
     if (options.ongoing) args.push('--ongoing');
     if (options.alertOnce) args.push('--alert-once');
-    if (options.priority) args.push('--priority', options.priority); // high, low, max, min, default
+    if (options.priority) args.push('--priority', options.priority);
     
-    execSync(`termux-notification ${args.map(a => `"${a}"`).join(' ')}`, {
+    const result = spawnSync('termux-notification', args, {
       encoding: 'utf-8',
       timeout: 5000
     });
-    return { success: true };
+    
+    if (result.status === 0) {
+      return { success: true };
+    }
+    return { error: result.stderr || 'Notification failed' };
   } catch (error) {
     return { error: error.message };
   }
@@ -193,8 +209,11 @@ export async function vibrate(durationMs = 200) {
   if (!await isEnabled('vibrate')) return { skipped: true };
   
   try {
-    execSync(`termux-vibrate -d ${durationMs}`, { encoding: 'utf-8', timeout: 2000 });
-    return { success: true };
+    const result = spawnSync('termux-vibrate', ['-d', String(durationMs)], { 
+      encoding: 'utf-8', 
+      timeout: 2000 
+    });
+    return { success: result.status === 0 };
   } catch (error) {
     return { error: error.message };
   }
@@ -205,7 +224,8 @@ export async function vibrate(durationMs = 200) {
 // ============================================
 
 /**
- * Show confirm dialog (returns true/false)
+ * Show confirm dialog (returns true/false/null)
+ * Returns null if dialog couldn't be shown (fallback to terminal)
  */
 export async function showConfirmDialog(title, hint = '') {
   if (!await isEnabled('confirmDialog')) {
@@ -213,18 +233,28 @@ export async function showConfirmDialog(title, hint = '') {
   }
   
   try {
+    // termux-dialog confirm -t "title" -i "hint"
     const args = ['confirm', '-t', title];
     if (hint) args.push('-i', hint);
     
-    const result = execSync(`termux-dialog ${args.map(a => `"${a}"`).join(' ')}`, {
+    const result = spawnSync('termux-dialog', args, {
       encoding: 'utf-8',
-      timeout: 60000 // 1 minute timeout for user input
+      timeout: 120000 // 2 minute timeout for user input
     });
     
-    const parsed = JSON.parse(result);
+    if (result.status !== 0) {
+      return null; // Fallback to terminal
+    }
+    
+    const output = result.stdout.trim();
+    if (!output) return null;
+    
+    const parsed = JSON.parse(output);
+    // termux-dialog confirm returns: {"code":-1,"text":"yes"} or {"code":-2,"text":"no"}
     return parsed.text === 'yes';
   } catch (error) {
-    return null; // Fallback to terminal
+    // Dialog failed, fallback to terminal
+    return null;
   }
 }
 
@@ -237,17 +267,21 @@ export async function showInputDialog(title, hint = '', multiline = false) {
   }
   
   try {
-    const type = multiline ? 'text' : 'text';
-    const args = [type, '-t', title];
+    const args = ['text', '-t', title];
     if (hint) args.push('-i', hint);
     if (multiline) args.push('-m');
     
-    const result = execSync(`termux-dialog ${args.map(a => `"${a}"`).join(' ')}`, {
+    const result = spawnSync('termux-dialog', args, {
       encoding: 'utf-8',
       timeout: 120000
     });
     
-    const parsed = JSON.parse(result);
+    if (result.status !== 0) return null;
+    
+    const output = result.stdout.trim();
+    if (!output) return null;
+    
+    const parsed = JSON.parse(output);
     return parsed.text;
   } catch (error) {
     return null;
@@ -265,17 +299,14 @@ export async function speak(text) {
   if (!await isEnabled('tts')) return { skipped: true };
   
   try {
-    const proc = spawn('termux-tts-speak', [], { stdio: ['pipe', 'pipe', 'pipe'] });
-    proc.stdin.write(text);
-    proc.stdin.end();
-    
-    await new Promise((resolve) => {
-      proc.on('close', resolve);
-      // Don't wait too long
-      setTimeout(resolve, 30000);
+    // Use spawnSync with input
+    const result = spawnSync('termux-tts-speak', [], {
+      input: text,
+      encoding: 'utf-8',
+      timeout: 60000 // 1 minute for long text
     });
     
-    return { success: true };
+    return { success: result.status === 0 };
   } catch (error) {
     return { error: error.message };
   }
