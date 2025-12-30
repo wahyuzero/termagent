@@ -14,6 +14,7 @@ import { executeTool } from '../tools/index.js';
 import { writeFile } from 'fs/promises';
 import { join } from 'path';
 import costTracker from './cost.js';
+import termuxApi from './termux-api.js';
 
 // Configure marked for terminal rendering
 marked.setOptions({
@@ -75,6 +76,7 @@ const SLASH_COMMANDS = [
   { value: '/provider', name: '/provider - Switch provider', description: 'Change AI provider' },
   { value: '/export', name: '/export - Export chat', description: 'Save to markdown' },
   { value: '/save', name: '/save - Save session', description: 'Save current session' },
+  { value: '/termux', name: '/termux - Termux:API settings', description: 'Toggle Termux:API features' },
 ];
 
 /**
@@ -392,6 +394,10 @@ export class ChatRepl {
         await this.exportConversation(arg);
         break;
 
+      case 'termux':
+        await this.handleTermuxCommand(arg);
+        break;
+
       default:
         console.log(chalk.yellow(`Unknown command: /${cmd}`));
         console.log(chalk.gray('Type /help for available commands\n'));
@@ -505,6 +511,19 @@ export class ChatRepl {
           
           // Auto-save
           await autoSave();
+          
+          // Termux:API notifications for completed tasks with tool calls
+          if (this.lastToolCallCount > 0) {
+            await termuxApi.vibrate(100);
+            if (this.lastToolCallCount >= 3) {
+              // Only notify for significant tasks (3+ tool calls)
+              await termuxApi.showNotification(
+                'TermAgent',
+                `Task completed with ${this.lastToolCallCount} tool calls`,
+                { alertOnce: true }
+              );
+            }
+          }
           
           // Check if we should auto-continue
           if (this.autoContinue && this.shouldAutoContinue(response, this.lastToolCallCount)) {
@@ -694,6 +713,25 @@ export class ChatRepl {
       ? cmd.slice(0, maxLen) + '...'
       : cmd;
     
+    // Try Termux dialog first if available
+    const dialogResult = await termuxApi.showConfirmDialog(
+      'Run command?',
+      displayCmd
+    );
+    
+    if (dialogResult !== null) {
+      // Termux dialog was shown
+      if (dialogResult) {
+        console.log(chalk.green(`\n   ${ICONS.success} Allowed (via dialog)`));
+        await termuxApi.vibrate(50);
+        return true;
+      } else {
+        console.log(chalk.red(`\n   ${ICONS.error} Denied (via dialog)`));
+        return false;
+      }
+    }
+    
+    // Fallback to terminal confirmation
     console.log(chalk.yellow(`\n   ${ICONS.warning} Command requires confirmation:`));
     console.log(chalk.white(`   $ ${displayCmd}`));
     
@@ -774,13 +812,19 @@ export class ChatRepl {
     console.log(chalk.white('  /status       ') + chalk.gray('Session status'));
     console.log(chalk.white('  /provider, /p ') + chalk.gray('Switch provider (interactive)'));
     console.log();
-    
-    console.log(chalk.gray('💡 Tips:'));
-    console.log(chalk.gray('  • Type "/" alone for interactive command menu'));
-    console.log(chalk.gray('  • Use ↑/↓ arrows to navigate command history'));
-    console.log(chalk.gray('  • Type "a" at confirmation to always-allow'));
-    console.log(chalk.gray('  • Git branch shown in prompt (e.g., main* >)'));
+
+    console.log(chalk.gray('/termux'));
+    console.log(chalk.gray('Toggle Termux:API features :'));
+    console.log(chalk.gray('/termux tts'));
+    console.log(chalk.gray('/termux vibrate'));
+    console.log(chalk.gray('/termux confirmDialog'));
+    console.log(chalk.gray('/termux notification'));
     console.log();
+
+    console.log(chalk.gray('Git'));
+    console.log(chalk.gray('• Git branch shown in prompt (e.g., main* >)'));
+    console.log();
+
   }
 
   /**
@@ -1081,6 +1125,77 @@ export class ChatRepl {
       
     } catch (error) {
       console.log(chalk.red(`\n${ICONS.error} Export failed: ${error.message}\n`));
+    }
+  }
+
+  /**
+   * Handle Termux:API command
+   * /termux - Show status
+   * /termux <feature> - Toggle feature
+   */
+  async handleTermuxCommand(arg) {
+    const isAvailable = termuxApi.checkTermuxApi();
+    
+    if (!isAvailable) {
+      console.log(chalk.yellow('\n   ⚠ Termux:API not detected\n'));
+      console.log(chalk.gray('   Install with:'));
+      console.log(chalk.white('   1. pkg install termux-api'));
+      console.log(chalk.white('   2. Install Termux:API app from F-Droid\n'));
+      return;
+    }
+    
+    // If argument provided, toggle that feature
+    if (arg) {
+      const feature = arg.toLowerCase().trim();
+      const result = await termuxApi.toggleOption(feature);
+      
+      if (result.error) {
+        console.log(chalk.red(`\n   ${ICONS.error} ${result.error}`));
+        console.log(chalk.gray('   Available options: enabled, clipboard, notifications, toast, vibrate, confirmDialog, tts\n'));
+        return;
+      }
+      
+      const status = result.enabled ? chalk.green('ON') : chalk.red('OFF');
+      console.log(chalk.green(`\n   ${ICONS.success} ${result.option}: ${status}\n`));
+      
+      // Show toast if toggling toast on
+      if (feature === 'toast' && result.enabled) {
+        await termuxApi.showToast('Toast enabled! 🎉');
+      }
+      // Show notification if toggling notifications on
+      if (feature === 'notifications' && result.enabled) {
+        await termuxApi.showNotification('TermAgent', 'Notifications enabled! 🔔');
+      }
+      
+      return;
+    }
+    
+    // Show status
+    const status = await termuxApi.getStatus();
+    
+    console.log(chalk.cyan('\n   TERMUX:API STATUS\n'));
+    console.log(chalk.gray(`   Available: ${status.available ? chalk.green('Yes ✓') : chalk.red('No ✗')}`));
+    
+    if (status.features) {
+      console.log();
+      const features = [
+        ['enabled', 'Master Toggle'],
+        ['clipboard', 'Clipboard Access'],
+        ['notifications', 'Notifications'],
+        ['toast', 'Toast Messages'],
+        ['vibrate', 'Vibration'],
+        ['confirmDialog', 'Confirm Dialogs'],
+        ['tts', 'Text-to-Speech'],
+      ];
+      
+      for (const [key, label] of features) {
+        const isOn = status.features[key];
+        const icon = isOn ? chalk.green('● ON ') : chalk.red('○ OFF');
+        console.log(chalk.gray(`   ${icon}  ${label}`));
+      }
+      
+      console.log(chalk.gray('\n   Toggle: /termux <feature>'));
+      console.log(chalk.gray('   Example: /termux tts\n'));
     }
   }
 

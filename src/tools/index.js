@@ -11,6 +11,7 @@ import testing from './testing.js';
 import build from './build.js';
 import plugins from '../plugins/index.js';
 import mcp from '../mcp/index.js';
+import termuxApi from '../utils/termux-api.js';
 
 // Plugin tools (loaded dynamically)
 let pluginTools = {};
@@ -29,6 +30,10 @@ const builtinTools = {
   ...Object.fromEntries(testing.definitions.map((d) => [d.name, { ...d, module: testing }])),
   ...Object.fromEntries(build.definitions.map((d) => [d.name, { ...d, module: build }])),
   ...Object.fromEntries(mcp.definitions.map((d) => [d.name, { ...d, module: mcp }])),
+  // Termux:API tools (conditional - only if available)
+  ...(termuxApi.checkTermuxApi() 
+    ? Object.fromEntries(termuxApi.definitions.map((d) => [d.name, { ...d, module: termuxApi }]))
+    : {}),
 };
 
 /**
@@ -72,6 +77,8 @@ export function getToolDefinitions() {
     ...testing.definitions,
     ...build.definitions,
     ...mcp.definitions,
+    // Termux:API tools (only if available)
+    ...(termuxApi.checkTermuxApi() ? termuxApi.definitions : []),
   ];
   
   const pluginDefs = plugins.getPluginDefinitions();
